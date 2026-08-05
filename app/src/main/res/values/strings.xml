@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Introspect</string>
+    <string name="notification_channel_name">Monitoring active</string>
+    <string name="notification_title">Introspect is recording</string>
+    <string name="notification_text">Battery, thermal, boot and doze signals</string>
+    <string name="start_service">Start monitoring</string>
+    <string name="stop_service">Stop monitoring</string>
+    <string name="export_csv">Export CSV</string>
+    <string name="request_battery_exemption">Exempt from battery optimisation</string>
+</resources>
