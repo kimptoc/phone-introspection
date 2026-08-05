@@ -31,12 +31,29 @@ rather than a guess.
 
 Checklist for the review:
 
-- [ ] Confirm "Exempt from battery optimisation" was granted on-device
+- [x] Confirm "Exempt from battery optimisation" was granted on-device
       (without it the service likely dies well before a week is up).
+      Confirmed via `dumpsys deviceidle whitelist` on 2026-08-05.
 - [ ] Export CSV and check for gaps in the `doze`/`boot` samples —
       unexplained gaps mean the service got killed, not that anything is
       broken.
 - [ ] Check the `exit_reason` collector for anything recorded.
+
+### Finding: boot-restart works, but Samsung delays delivery ~14 min (2026-08-05)
+
+Rebooted the phone to test `BootReceiver` end to end. Result: it works —
+foreground service restarted, notification posted, `boot` collector picked
+up the new boot timestamp — but `ACTION_BOOT_COMPLETED` wasn't delivered to
+the app until **~14 minutes after boot actually completed** (confirmed via
+`dumpsys activity broadcasts` timestamps vs `uptime`), not immediately as
+on stock Android.
+
+This is the risk spec §7 predicted ("Samsung background restrictions"),
+now measured rather than assumed. The delay coincided with the phone being
+unlocked and adb reconnecting, which may have nudged Samsung into flushing
+deferred broadcasts — a phone left untouched after reboot could plausibly
+take longer. Not a blocker for the soak test, but explains why any
+post-reboot gap in the data isn't necessarily a bug.
 
 ## Next: Phase 2 (T1)
 
