@@ -2,18 +2,21 @@ package net.kimptoc.introspect.service
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.BatteryManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import net.kimptoc.introspect.MainActivity
 import net.kimptoc.introspect.R
 
 /**
  * Fires a one-shot notification the first time battery level drops below
- * a threshold, then re-arms once it's charged back above it. Useful for
- * charge/discharge test cycles (e.g. Samsung support asking to charge to
- * 100% and check battery usage once past 50%).
+ * a fixed threshold while discharging, then re-arms once it's charged
+ * back above it. Useful for charge/discharge test cycles (e.g. Samsung
+ * support asking to charge to 100% and check battery usage once past
+ * 50%). Not user-configurable — THRESHOLD_PCT is a fixed constant.
  */
 object BatteryThresholdNotifier {
     private const val THRESHOLD_PCT = 50
@@ -27,8 +30,18 @@ object BatteryThresholdNotifier {
         val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
         if (level < 0 || scale <= 0) return
         val pct = 100.0 * level / scale
+        val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0
 
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        if (!prefs.contains(ARMED_KEY)) {
+            // First-ever observation: ACTION_BATTERY_CHANGED is sticky and replays the
+            // current state as soon as the receiver registers, which isn't a real
+            // crossing. Seed from the current reading instead of assuming one happened.
+            prefs.edit().putBoolean(ARMED_KEY, pct >= THRESHOLD_PCT).apply()
+            return
+        }
+
         val armed = prefs.getBoolean(ARMED_KEY, true)
 
         if (pct >= THRESHOLD_PCT) {
@@ -36,7 +49,7 @@ object BatteryThresholdNotifier {
             return
         }
 
-        if (armed) {
+        if (armed && !plugged) {
             notify(context, pct)
             prefs.edit().putBoolean(ARMED_KEY, false).apply()
         }
@@ -54,10 +67,16 @@ object BatteryThresholdNotifier {
             )
         }
 
+        val contentIntent = PendingIntent.getActivity(
+            context, 0, Intent(context, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setContentTitle(context.getString(R.string.battery_threshold_title))
             .setContentText(context.getString(R.string.battery_threshold_text, pct.toInt()))
             .setSmallIcon(android.R.drawable.sym_def_app_icon)
+            .setContentIntent(contentIntent)
             .setAutoCancel(true)
             .build()
         notificationManager.notify(NOTIFICATION_ID, notification)
