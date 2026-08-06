@@ -32,7 +32,7 @@ class NetworkStatsCollector : Collector {
         val lastRun = prefs.getLong(lastRunKey, 0L)
         if (now - lastRun < intervalMs) return emptyList()
 
-        val windowStart = now - intervalMs
+        val windowStart = if (lastRun > 0L) lastRun else now - intervalMs
         val samples = mutableListOf<Sample>()
         samples += queryType(networkStatsManager, ConnectivityManager.TYPE_MOBILE, "mobile", windowStart, now)
         samples += queryType(networkStatsManager, ConnectivityManager.TYPE_WIFI, "wifi", windowStart, now)

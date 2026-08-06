@@ -32,8 +32,14 @@ class UsageForegroundCollector : Collector {
         val lastRun = prefs.getLong(lastRunKey, 0L)
         if (now - lastRun < intervalMs) return emptyList()
 
-        val windowStart = now - intervalMs
-        val stats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, windowStart, now)
+        val windowStart = if (lastRun > 0L) lastRun else now - intervalMs
+        val stats = try {
+            usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_BEST, windowStart, now)
+        } catch (e: SecurityException) {
+            return emptyList()
+        } catch (e: RuntimeException) {
+            return emptyList()
+        }
 
         val samples = stats
             .filter { it.totalTimeInForeground > 0 }

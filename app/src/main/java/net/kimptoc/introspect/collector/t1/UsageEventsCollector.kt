@@ -33,7 +33,13 @@ class UsageEventsCollector : Collector {
         val lastSeen = prefs.getLong(lastSeenKey, -1L)
         val startTime = if (lastSeen < 0L) now - bootstrapWindowMs else lastSeen
 
-        val events = usageStatsManager.queryEvents(startTime, now)
+        val events = try {
+            usageStatsManager.queryEvents(startTime, now)
+        } catch (e: SecurityException) {
+            return emptyList()
+        } catch (e: RuntimeException) {
+            return emptyList()
+        }
         val samples = mutableListOf<Sample>()
         var maxTimestamp = lastSeen
         val event = UsageEvents.Event()
