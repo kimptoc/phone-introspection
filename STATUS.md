@@ -83,6 +83,31 @@ overnight — that needs per-app foreground time, i.e. Phase 2 (T1). If this
 pattern repeats before 08-12, it's a real argument for starting T1 sooner
 rather than waiting out the full soak-test week.
 
+### Follow-up: ground-truthed two of the windows above against what was actually happening (2026-08-06)
+
+User confirmed what the phone was doing during two stretches from the table above:
+
+- **02:00–07:00** was actually on the charger (AC, 37%→95%) the whole time,
+  not an idle-discharge window at all — `device_idle=false` there is
+  expected (Doze doesn't engage while charging), not part of the "Doze
+  never engages" anomaly above.
+- **07:30–09:00** ("in the garden, not using the phone, just playing
+  [streaming] music") turned out not to be uniformly idle either: screen/lock
+  state showed ~37 min unlocked+screen-on at the start (07:30–08:07), ~26 min
+  genuinely screen-off+locked (08:22–08:48) matching the description, then
+  unlocked again from 08:52. Net drain was 90%→65% in 89 min (-16.8%/hr).
+
+The more useful signal: current draw was nearly identical whether the
+screen was on or off during this window (0.82A vs 0.87A) — on a truly idle
+phone screen-off draw should be a fraction of screen-on draw. Confirmed
+cause is streaming audio: decode + network + Bluetooth/speaker output keep
+drawing power independent of screen state, so the "idle" portion wasn't
+actually low-power. Not a bug — but it means streaming sessions cost close
+to what active screen use would, and reinforces that T0 can't distinguish
+local playback from streaming or attribute the draw to a specific app —
+exactly what T1's per-app + network data would settle directly instead of
+by cross-referencing what the user remembers doing.
+
 ## Next: Phase 2 (T1)
 
 UsageStats + NetworkStats collectors, reconciliation logic, and an
