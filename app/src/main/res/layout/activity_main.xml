@@ -34,6 +34,13 @@
         android:layout_marginTop="8dp"
         android:text="@string/export_csv" />
 
+    <Button
+        android:id="@+id/usageAccessButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/grant_usage_access" />
+
     <TextView
         android:id="@+id/tierStatusText"
         android:layout_width="match_parent"

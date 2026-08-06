@@ -108,8 +108,49 @@ local playback from streaming or attribute the draw to a specific app —
 exactly what T1's per-app + network data would settle directly instead of
 by cross-referencing what the user remembers doing.
 
-## Next: Phase 2 (T1)
+## Phase 2 (T1) — in progress, PR opened 2026-08-06
 
-UsageStats + NetworkStats collectors, reconciliation logic, and an
-onboarding flow that deep-links to the `PACKAGE_USAGE_STATS` appop Settings
-screen. Starts after the soak-test review, on a feature branch via PR.
+Started ahead of the planned 08-12 review, per the two findings above:
+the battery-drain investigation repeatedly hit the same wall (T0 can see
+*that* the screen was interactive or *that* current was flowing, but not
+*which app* was responsible), which was explicitly flagged as a reason to
+pull Phase 2 forward rather than wait out the rest of the soak-test week.
+
+Built on branch `phase2-t1`: `UsageEventsCollector` (incremental event
+stream, 24h bootstrap backfill on first run, advances via `maxTs + 1` to
+avoid re-emitting the boundary event), `UsageForegroundCollector` and
+`NetworkStatsCollector` (both gated to a 30-min-minimum cadence via a
+stored last-run timestamp — running them every 60s would emit one row per
+installed package per cycle, a real storage-growth risk on a phone with
+hundreds of packages), `InstalledPackagesCollector` (one-time snapshot,
+dedup'd via a stored hash so it only re-emits when the package set
+actually changes), and a "Grant usage access" onboarding button that
+deep-links to `Settings.ACTION_USAGE_ACCESS_SETTINGS`. Manifest gained
+`PACKAGE_USAGE_STATS` and `QUERY_ALL_PACKAGES`; confirmed `INTERNET` is
+still absent from the merged manifest (`ACCESS_NETWORK_STATE`/`WAKE_LOCK`
+showed up, pulled in by WorkManager's own manifest — read-only, no egress
+capability, doesn't affect the no-network-egress guarantee).
+
+Verified on-device (appop granted via `adb shell appops set … allow`,
+no UI automation needed for that part): bootstrap backfill pulled in
+7,798 events from the prior 24h on first run; the 30-min-gated collectors
+each fired exactly once immediately (as designed) rather than every
+cycle; `NetworkStatsManager.querySummary` worked with just the appop
+grant, no separate permission needed; no crashes. Still pending: confirming
+the appop-*revoke* path takes T1 back to dark cleanly (tracked as a
+follow-up, screen-free, doesn't need to block the PR).
+
+**This install interrupted the running soak test** — same as any
+reinstall, it kills the process (`installPackageLI` in `exit_reason`,
+consistent with the first entry from 08-05) and the foreground service
+needed manually restarting; the ~14-min Samsung boot-restart delay
+documented above applies to a full device reboot, not a reinstall, so it
+wasn't a factor here. App data (all prior T0 history) survived the
+update intact since this was a version upgrade, not an uninstall.
+
+PR opened, not merged — per "PRs going forward."
+
+## Next: after Phase 2 merges
+
+Phase 3 (T2 + provisioning script) per spec §6, once T1 has had some
+real runway and the soak-test checklist above is fully closed out.

@@ -17,6 +17,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import net.kimptoc.introspect.collector.CollectorRegistry
+import net.kimptoc.introspect.collector.t1.UsageAccess
 import net.kimptoc.introspect.export.CsvExporter
 import net.kimptoc.introspect.service.MonitoringService
 import net.kimptoc.introspect.service.SamplingWorker
@@ -41,6 +42,7 @@ class MainActivity : ComponentActivity() {
         val toggleButton = findViewById<Button>(R.id.toggleServiceButton)
         val exemptionButton = findViewById<Button>(R.id.batteryExemptionButton)
         val exportButton = findViewById<Button>(R.id.exportButton)
+        val usageAccessButton = findViewById<Button>(R.id.usageAccessButton)
         val statusText = findViewById<TextView>(R.id.serviceStatusText)
 
         toggleButton.setOnClickListener {
@@ -61,6 +63,8 @@ class MainActivity : ComponentActivity() {
         exportButton.setOnClickListener {
             exportLauncher.launch("introspect-export-${System.currentTimeMillis()}.csv")
         }
+
+        usageAccessButton.setOnClickListener { requestUsageAccessIfNeeded() }
 
         refreshTierStatus()
     }
@@ -93,6 +97,11 @@ class MainActivity : ComponentActivity() {
                 Uri.parse("package:$packageName"),
             ),
         )
+    }
+
+    private fun requestUsageAccessIfNeeded() {
+        if (UsageAccess.isGranted(this)) return
+        startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
     }
 
     private fun exportTo(uri: Uri) {
