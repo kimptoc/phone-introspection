@@ -6,6 +6,10 @@ import net.kimptoc.introspect.collector.t0.BootCollector
 import net.kimptoc.introspect.collector.t0.DozeScreenCollector
 import net.kimptoc.introspect.collector.t0.ExitReasonCollector
 import net.kimptoc.introspect.collector.t0.ThermalCollector
+import net.kimptoc.introspect.collector.t1.InstalledPackagesCollector
+import net.kimptoc.introspect.collector.t1.NetworkStatsCollector
+import net.kimptoc.introspect.collector.t1.UsageEventsCollector
+import net.kimptoc.introspect.collector.t1.UsageForegroundCollector
 
 /**
  * Every known collector, in one place. [availableCollectors] is re-probed
@@ -20,6 +24,10 @@ object CollectorRegistry {
         BootCollector(),
         DozeScreenCollector(),
         ExitReasonCollector(),
+        UsageEventsCollector(),
+        UsageForegroundCollector(),
+        NetworkStatsCollector(),
+        InstalledPackagesCollector(),
     )
 
     fun availableCollectors(context: Context): List<Collector> =
