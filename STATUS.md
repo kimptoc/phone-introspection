@@ -191,6 +191,29 @@ loop), then re-granted and confirmed `usage_events` resumed immediately
 both phases, confirming the service loop itself was never at risk —
 only the T1 collectors were cleanly gated.
 
+### Likely confound: known S25/S24 Ultra battery/thermal regression from the July 2026 patch (2026-08-06)
+
+[NotebookCheck reported](https://www.notebookcheck.net/Galaxy-S25-Ultra-and-S24-Ultra-owners-report-severe-battery-drain-and-overheating-issues-after-July-update.1353452.0.html)
+(2026-07-29) that Samsung's July security patch caused widespread S25
+Ultra/S24 Ultra battery drain and overheating: affected users report
+5–7%/hour loss while genuinely idle, hotter-than-normal running
+temperatures, and slower charging. No Samsung acknowledgment or fix as
+of the article date.
+
+This phone's security patch is **2026-07-05** — squarely the patch in
+question. Checked via `adb shell getprop ro.build.version.security_patch`.
+
+This doesn't overturn the earlier drain findings above (Doze not
+engaging, screen-on time, streaming audio) — none of our flagged
+windows were purely idle, so we can't cleanly separate "usage-driven"
+from "bugged idle floor." More likely the two stack: this regression
+inflates the baseline underneath whatever real usage is happening on
+top. Treat as a standing confound on every drain number this app
+reports until Samsung ships a fix — if rates drop sharply after some
+future OTA, that's the tell this was the cause rather than usage
+patterns. Nothing actionable on our end; there's no known workaround,
+only a firmware fix would resolve it.
+
 ## Next: after Phase 2 merges
 
 Phase 3 (T2 + provisioning script) per spec §6, once T1 has had some
