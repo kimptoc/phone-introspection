@@ -36,6 +36,9 @@ class MonitoringService : Service() {
 
     private val eventReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_BATTERY_CHANGED) {
+                BatteryThresholdNotifier.onBatteryChanged(context, intent)
+            }
             collectAndPersistAsync()
         }
     }
