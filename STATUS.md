@@ -136,9 +136,8 @@ no UI automation needed for that part): bootstrap backfill pulled in
 7,798 events from the prior 24h on first run; the 30-min-gated collectors
 each fired exactly once immediately (as designed) rather than every
 cycle; `NetworkStatsManager.querySummary` worked with just the appop
-grant, no separate permission needed; no crashes. Still pending: confirming
-the appop-*revoke* path takes T1 back to dark cleanly (tracked as a
-follow-up, screen-free, doesn't need to block the PR).
+grant, no separate permission needed; no crashes. The appop-*revoke* path
+was confirmed separately below.
 
 **This install interrupted the running soak test** — same as any
 reinstall, it kills the process (`installPackageLI` in `exit_reason`,
@@ -149,6 +148,48 @@ wasn't a factor here. App data (all prior T0 history) survived the
 update intact since this was a version upgrade, not an uninstall.
 
 PR opened, not merged — per "PRs going forward."
+
+### Automated PR review caught 4 real issues (2026-08-06)
+
+An automated reviewer (kilo-code-bot) on PR #2 flagged, and all were
+fixed same-day:
+
+- `NetworkStatsCollector` and `UsageForegroundCollector` computed their
+  query window as `now - 30min` instead of anchoring to `lastRun`. If a
+  cycle ran late — which WorkManager + Doze makes routine, not rare —
+  the gap between the previous `lastRun` and the new `now - 30min`
+  silently vanished. `UsageEventsCollector`'s watermark approach
+  (`maxTs + 1`) didn't have this problem; the other two now use
+  `lastRun` as the window start the same way.
+- `UsageEventsCollector` and `UsageForegroundCollector` had no exception
+  handling around `queryEvents`/`queryUsageStats`, unlike
+  `NetworkStatsCollector`. A user revoking usage access between
+  `isAvailable()` and `collect()` is a normal race, not an edge case —
+  both now catch `SecurityException`/`RuntimeException` and return an
+  empty list, consistent with the rest of the codebase's "missing
+  sample, not a crash" philosophy (spec §3).
+
+### Finding: battery died at 0%, came back on its own, tested revoke path too (2026-08-06)
+
+Phone died from battery exhaustion (not a deliberate reboot). Data
+confirms it cleanly: `level_pct` hit exactly **0.0%** at 13:54:06, a
+**61.7-minute gap** in the data follows, then samples resume at
+14:55:45 with the phone already at 47% and charging.
+
+`BootReceiver` fired **~1m42s after boot** this time (boot ~14:54:56,
+receiver delivered 14:56:38) — much faster than the ~14-minute delay
+measured after the earlier deliberate `adb reboot` test. Real-world
+variability in Samsung's broadcast-deferral heuristics, not a fixed
+constant; don't treat either number as the number.
+
+Also closed out the deferred appop-revoke acceptance test while the
+phone was connected: revoked `GET_USAGE_STATS` via adb, confirmed all
+four T1 collectors' row counts stayed exactly flat for 2+ minutes (no
+crash, `isAvailable()` correctly excluded them from the collection
+loop), then re-granted and confirmed `usage_events` resumed immediately
+(8657→8665 in the next cycle). T0 collectors kept writing throughout
+both phases, confirming the service loop itself was never at risk —
+only the T1 collectors were cleanly gated.
 
 ## Next: after Phase 2 merges
 
