@@ -321,10 +321,32 @@ Python 2 isn't installable-by-default on a modern Mac. Decision: keep
 doing targeted manual `dumpsys batterystats` pulls, which have been
 working fine.
 
+### Corroboration: Android Auto reconnect pattern matches known One UI 8.5 reports
+
+Shared the quantified dongle findings (160 reconnect sessions/48h,
+~14h continuous Bluetooth scan time) externally for a second opinion.
+Independent public reports describe the same symptom — Android Auto
+"connecting, dropping within seconds, repeating" — as a known issue
+following the One UI 8.5 update, including at least one report of a
+wireless Android Auto adapter that worked fine for months and broke
+immediately after updating to 8.5. This phone is confirmed on **One UI
+8.5** (user-confirmed).
+
+This reframes the dongle issue: likely a **software regression on
+Samsung's side** (Bluetooth/Android Auto handling in 8.5), not a
+hardware fault in the dongle itself — replacing the dongle would
+probably not fix it. Plausibly bundled into the same update lineage as
+the July security patch already flagged as a confound above, though
+that's not confirmed (One UI feature updates and monthly security
+patches often ship together, but aren't necessarily the same change).
+
 ## Next
 
 - User to clear storage (podcast downloads) and monitor per Samsung's
   ask; check back on whether the memory/dongle fixes + storage headroom
   measurably change the drain pattern.
+- Mention the One UI 8.5 Android Auto corroboration to Samsung support
+  alongside the existing thread — it's independent evidence for a
+  software-side root cause, not just this one phone's anecdote.
 - Phase 3 (T2 + provisioning script) per spec §6, once the above
   monitoring window closes and there's runway to pick it up.
