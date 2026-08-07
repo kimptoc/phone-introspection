@@ -5,6 +5,8 @@ import android.content.Context
 import net.kimptoc.introspect.collector.Collector
 import net.kimptoc.introspect.collector.Sample
 import net.kimptoc.introspect.collector.Tier
+import java.time.Instant
+import java.time.ZoneId
 
 /**
  * Per-package foreground-time delta since this collector's last successful
@@ -19,8 +21,13 @@ import net.kimptoc.introspect.collector.Tier
  * `totalTimeInForeground` is a cumulative "so far today" figure that
  * resets at local midnight, not "time in foreground during this cycle".
  * This collector diffs against a stored per-package baseline itself to
- * get a real per-cycle delta, and treats a drop below the stored baseline
- * as a fresh count (the midnight reset) rather than a negative delta.
+ * get a real per-cycle delta. A drop below the stored baseline is only
+ * trusted as the midnight reset if the query window actually crosses a
+ * local-midnight boundary — the same drop can also mean an app data
+ * clear, an uninstall/reinstall, or the OS pruning its usage stats, none
+ * of which should be reported as a burst of new foreground time. Deltas
+ * are clamped to the wall-clock time elapsed since the last run, since
+ * foreground time can never exceed real elapsed time.
  */
 class UsageForegroundCollector : Collector {
     override val id = "usage_foreground"
@@ -53,8 +60,10 @@ class UsageForegroundCollector : Collector {
 
         val prefsEditor = prefs.edit()
         val samples = mutableListOf<Sample>()
+        val elapsedMs = now - windowStart
+        val windowCrossesMidnight = crossesLocalMidnight(windowStart, now)
 
-        for (stat in stats) {
+        for (stat in stats.orEmpty()) {
             if (stat.totalTimeInForeground <= 0) continue
             val baselineKey = baselinePrefix + stat.packageName
             val baseline = prefs.getLong(baselineKey, -1L)
@@ -67,13 +76,21 @@ class UsageForegroundCollector : Collector {
                 continue
             }
 
-            val delta = if (stat.totalTimeInForeground >= baseline) {
+            val rawDelta = if (stat.totalTimeInForeground >= baseline) {
                 stat.totalTimeInForeground - baseline
-            } else {
+            } else if (windowCrossesMidnight) {
                 // Local-midnight bucket reset: the new cumulative value is
                 // itself the delta since the reset, not since our baseline.
                 stat.totalTimeInForeground
+            } else {
+                // Drop with no midnight crossing to explain it: data clear,
+                // uninstall/reinstall, or an OS stats purge. The baseline
+                // above has already been re-seeded to resync; don't emit a
+                // value we can't trust as real new foreground time.
+                continue
             }
+
+            val delta = minOf(rawDelta, elapsedMs)
             if (delta <= 0) continue
 
             samples += Sample(
@@ -88,5 +105,12 @@ class UsageForegroundCollector : Collector {
         prefsEditor.putLong(lastRunKey, now)
         prefsEditor.apply()
         return samples
+    }
+
+    private fun crossesLocalMidnight(start: Long, end: Long): Boolean {
+        val zone = ZoneId.systemDefault()
+        val startDate = Instant.ofEpochMilli(start).atZone(zone).toLocalDate()
+        val endDate = Instant.ofEpochMilli(end).atZone(zone).toLocalDate()
+        return startDate != endDate
     }
 }
