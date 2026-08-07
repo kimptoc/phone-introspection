@@ -55,8 +55,11 @@ Design rule: **every collector declares its tier**, and the app surfaces which t
 | Own process CPU, own RSS | `Process.getElapsedCpuTime()`, `/proc/self/*` |
 | Why our own process last died | `ActivityManager.getHistoricalProcessExitReasons()` |
 | Per-CPU current frequency *(best effort)* | `/sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq` |
+| Free internal storage (total / available / pct) | `StatFs` on app data volume |
 
 The `cpufreq` read is OEM-dependent and may be SELinux-denied. Treat as optional; never let a failure there break a collection cycle.
+
+Free storage wasn't in the original signal inventory — added after Samsung support flagged low storage headroom (<10% free) as a potential contributor to instability/overheating during the diagnostic exchange. Same rule applies: `StatFs` failures should degrade to a missing sample, not a broken cycle.
 
 ### T1 — user-granted via Settings
 
