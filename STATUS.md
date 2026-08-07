@@ -214,7 +214,117 @@ future OTA, that's the tell this was the cause rather than usage
 patterns. Nothing actionable on our end; there's no known workaround,
 only a firmware fix would resolve it.
 
-## Next: after Phase 2 merges
+## 2026-08-07: shipped fixes, quantified the Android Auto dongle issue, Samsung support engagement, storage + memory findings
 
-Phase 3 (T2 + provisioning script) per spec §6, once T1 has had some
-real runway and the soak-test checklist above is fully closed out.
+### Shipped
+
+- **PR #3** (battery-threshold notification, fixed at 50%) merged. Fires
+  once on a real downward crossing while unplugged, re-arms once charged
+  back above 50%. Verified twice independently on real crossings
+  (2026-08-06 22:07:12 and 2026-08-07 09:52:29 — the latter matched the
+  underlying battery broadcast timestamp to the second).
+- **Issue #4 / PR #5**: `UsageForegroundCollector` was reporting a
+  cumulative "so far today" total, not a per-cycle delta — root cause was
+  `queryUsageStats(INTERVAL_BEST, …)` snapping to Android's own coarser
+  stored buckets rather than the requested custom window. Fixed by
+  diffing against a stored per-package baseline; a drop below baseline is
+  only trusted as the midnight reset if the window actually crosses local
+  midnight (checked via `java.time.LocalDate`), otherwise the package is
+  skipped that cycle rather than emitting an untrustworthy value. Verified
+  on-device: zero spurious rows for unchanged apps after the fix, vs.
+  the old behaviour of re-emitting the same stale number every cycle.
+- **Issue #6 / PR #7**: added `StorageCollector` (T0, no permission,
+  30-min gated) after Samsung support flagged low storage as a possible
+  contributor — see below.
+- Both new collectors went through a second review round (null-safety on
+  nullable platform types, wall-clock-jump handling treating a negative
+  `now - lastRun` as "run now" rather than blocking indefinitely) — same
+  class of bug caught twice by the automated PR review, now fixed
+  consistently across `NetworkStatsCollector`, `UsageForegroundCollector`,
+  and `StorageCollector`.
+
+### Finding: Android Auto dongle is reconnecting ~every 5–10 min, around the clock, unrelated to driving
+
+Quantified via `usage_events`: **160 distinct Gearhead (Android Auto)
+wake/connect sessions over 48 hours**, spanning 2026-08-05 13:03 through
+2026-08-07 08:58, including a steady cadence straight through 1am–5am
+both nights while the car was parked. This is the user's known flaky
+dongle, not drive activity — confirmed directly with the user. Cross-referenced
+against `dumpsys batterystats --charged`: **Bluetooth scan time was
+~14h05m, essentially the entire ~14h tracked period** — i.e. continuous,
+not occasional. Strong candidate for a real, fixable (dongle-side, not
+phone-side) contributor to background drain.
+
+### Finding: this morning's drain (2026-08-07) was usage-driven, not anomalous
+
+93%→49% over ~3h (-14.7%/hr) was fully explained once T1 data was
+available: ~29 min in Coin Master, ~16 min Chrome, ~15 min 1Password,
+BBC Sounds streamed ~60MB over wifi, Instagram ~21MB. Confirms the
+pattern from 2026-08-06: this phone's elevated drain rates generally
+have a real, findable usage story once T1 exists to check — the earlier
+guesswork (T0-only) couldn't have settled this.
+
+### 1Password slow-unlock, investigated twice
+
+**First instance:** thermal ruled out (status "light" only, headroom
+~0.80–0.84, battery 35.5°C — cooler than the morning's own 39.8°C peak).
+Traced via `usage_events`: opened 11:54:53, then a 42-second gap with no
+app-lifecycle events (likely the biometric overlay, which usage stats
+doesn't track), screen timed out to Daydream at 11:55:36 (only happens
+after a stretch of no touch input), woken and abandoned by 11:55:41 — a
+real ~45-second stall, not a perception issue. An initial theory that
+concurrent app activity (Global Player, a podcast app) caused contention
+was **wrong and corrected by the user** — those apps started *after* the
+user had already given up on 1Password, not during.
+
+**Second instance:** correlated with a Samsung Device Care alert
+("apps/processes overloading system, needs a restart") arriving at the
+same moment. Live `dumpsys meminfo` showed **1,026 total processes**,
+**Travel Town at 1.48GB PSS and Coin Master at 1.29GB PSS** individually
+(both idle, not being played), 8.8GB/11.4GB RAM in use, and at least two
+processes with a low-memory callback logged 2–6 minutes prior. Neither
+game had a battery-optimization whitelist entry or an elevated standby
+bucket (both were bucket 20/working-set, nothing special) — ruling out a
+Game-Booster-specific privilege and pointing at the plain per-app
+"background usage limit" setting as the real lever. User set both games
+to Restricted (from Optimised). Post-restart, used RAM dropped from
+8.8GB to 6.3GB.
+
+### Samsung support exchange
+
+Sent the Bluetooth-scan-time, screen-on/off split, and CPU-while-idle
+numbers above. Support's reply was substantive, not a brush-off: they
+correctly declined to confirm the July-patch causation from correlation
+alone, but explicitly validated the memory/process-bloat and Android
+Auto findings as plausible contributors, and asked for storage to be
+raised above 10% before a few hours of further monitoring.
+
+**Storage finding:** device was at **9.03% free** (20.7GB of 228.5GB) —
+below Samsung's recommended 10%, confirmed both via `df` and the new
+`StorageCollector`, which agreed closely (9.03% vs. an initial manual
+9.2%). Traced concrete, actionable culprits rather than leaving it
+vague: the podcast player app has **~12.4GB** of downloaded episodes in
+external storage, WhatsApp media is **~7.3GB** — only ~2.15GB needs
+freeing to cross 10%, so clearing old podcast downloads alone comfortably
+solves it.
+
+### Tooling note: Battery Historian evaluated and dropped
+
+Attempted to stand up [google/battery-historian](https://github.com/google/battery-historian)
+locally to visualize the `dumpsys batterystats` data we've been parsing
+by hand all session. Dropped after finding real blockers: the official
+prebuilt Docker image is gone (`gcr.io/android-battery-historian`
+returns unauthenticated/not-found), the repo predates Go modules (no
+`go.mod`), and its chart-rendering step shells out to a bundled
+Python **2** script at runtime — not just a build-time dependency, and
+Python 2 isn't installable-by-default on a modern Mac. Decision: keep
+doing targeted manual `dumpsys batterystats` pulls, which have been
+working fine.
+
+## Next
+
+- User to clear storage (podcast downloads) and monitor per Samsung's
+  ask; check back on whether the memory/dongle fixes + storage headroom
+  measurably change the drain pattern.
+- Phase 3 (T2 + provisioning script) per spec §6, once the above
+  monitoring window closes and there's runway to pick it up.
