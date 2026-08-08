@@ -373,11 +373,84 @@ cause: the user physically unplugged the dongle from the car on
 regression rather than a phone-setting-fixable issue — removing the
 dongle sidesteps it rather than resolving it.
 
+## 2026-08-08: Phase 3 (T2) shipped — BatteryStatsManager works, logcat cross-process visibility confirmed unavailable
+
+Both T2 signals from spec §3 built and merged (PR #8, PR #9), plus
+`scripts/provision.sh` wired into `./gradlew installDebug` via a
+Gradle `finalizedBy` task, so the adb grants can't be silently lost on
+reinstall the way spec §3/§7 warn about — confirmed firing
+automatically across several reinstalls this session.
+
+**BatteryAttributionCollector** (per-UID battery consumption, mAh
+since last charge): `BatteryStatsManager`/`BatteryUsageStats`/
+`UidBatteryConsumer` turned out to be `@SystemApi` — confirmed absent
+from the public SDK stub jars for API 33 through 36 — so this reflects
+into the framework rather than compiling against it directly. That
+reflection is itself blocked by Android's hidden-API enforcement
+unless `hidden_api_policy` is relaxed, so `BATTERY_STATS` and
+`hidden_api_policy` turned out to be a coupled requirement for this
+signal, not the two independent unlocks spec.md originally implied —
+spec.md corrected accordingly. Verified on-device: 146 real per-UID
+consumers with plausible values (system `android` 19.9 mAh, Routines
+10.8 mAh, dashcam app `com.mynextbase.connect` 3.5 mAh).
+
+**LogcatCollector** (thermal daemon/LMK/JobScheduler/Doze/ANR side
+channel): the collector mechanics are solid — verified over 110 cycles
+across ~9 hours that the `logcat -T '<time>'` watermark genuinely
+advances (`lines=` varying 0–118 per cycle, no duplicate/flooding
+rows), with a 5s exec timeout and concurrent stdout/stderr draining to
+stop a wedged `logcat` process from stalling the whole sampling cycle.
+But **`READ_LOGS` does not grant this app cross-process log
+visibility on this device** (S25 Ultra, Android 16, One UI 8.5,
+2026-07-05 patch), despite every documented step being followed
+correctly: manifest declaration, `pm grant`, confirmed
+`granted=true`, and the running process confirmed to hold gid `1007`
+(`log`) via `/proc/<pid>/status`, matching `platform.xml`'s
+`READ_LOGS` → `gid=log` mapping. Every line ever read carried this
+app's own PID throughout the 9-hour run, against 10 distinct PIDs
+visible to the shell UID over the same buffer. A runtime "allow access
+to logs" dialog appeared mid-session and was approved — retested
+afterward and it made no difference. Unlike `BatteryAttributionCollector`,
+there's no known complementary unlock; this looks like AOSP hardening
+or Samsung SELinux restricting `logd` read access below what the
+documented permission model implies.
+
+Chasing this down also surfaced a real bug: the collector's only
+"match" in that whole 9-hour run was a false positive — androidx.work's
+own `SystemJobScheduler` boilerplate (this app's own WorkManager
+instance) coincidentally contains the substring `jobscheduler`. Fixed
+by excluding the current process's PID before keyword matching, though
+that exclusion is narrower than it sounds: it only ever catches the
+*currently running* instance, so a line from an earlier incarnation of
+this same app (different PID, still sitting in buffer history) can
+still pass — observed directly during testing across repeated
+reinstalls.
+
+**Decision: keeping `LogcatCollector`** despite the confirmed-empty
+signal. Cost is ~290 rows/day of `read_status=ok ... pids=1` for as
+long as this remains true; kept per spec §2 ("a tier going dark must
+be visible, not silent") as a live tripwire in case a future OS or
+permission-model change opens up real visibility.
+
+Also closed out a carried-over task from Phase 2: verified
+`UsageForegroundCollector` emits real per-cycle deltas on-device.
+Checked 171 rows across 34 cycles since the T1 delta fix (PR #5)
+deployed — zero clamp violations, deltas in a plausible 0–30 min range
+averaging ~3 min. For contrast, pre-fix data from 2026-08-06 still
+sitting in the DB shows the old bug's signature clearly: the same
+package repeating an identical ~6-hour delta across ten consecutive
+30-minute cycles.
+
 ## Next
 
-- Keep monitoring — if the improved Doze/drain numbers hold for
-  several more days, that's a good signal for the Samsung thread; if
-  they regress, worth checking whether the games crept back to
-  Optimised or something else changed.
-- Phase 3 (T2 + provisioning script) per spec §6, once there's runway
-  to pick it up.
+- Keep monitoring the post-2026-08-07 improvement (Doze engagement,
+  drain rate) — if it holds for several more days that's a good signal
+  for the Samsung thread; if it regresses, check whether the games
+  crept back to Optimised or something else changed.
+- Phase 4 (T3 — Shizuku) per spec §6: `dumpsys` collectors, starting
+  with `sensorservice`/`batterystats`. Needs Shizuku installed and
+  paired on-device first (separate app, wireless-debugging pairing) —
+  that's setup on the user's side before this can be picked up.
+- Phase 5 (UI): timeline view aligning app sessions against thermal
+  state and battery drain. No new device access needed; could be
+  started independently of Shizuku setup.
