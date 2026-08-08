@@ -29,12 +29,16 @@ import java.util.concurrent.TimeUnit
  * there is no known complementary unlock for this one; it appears the
  * platform (AOSP hardening, Samsung SELinux, or both) restricts `logd`
  * read access below what the documented permission model implies. Lines
- * are still filtered to `Process.myPid()` before keyword matching, so a
- * `matches` row means "genuinely from another process" by construction,
- * not "self-noise that happened to contain a keyword" — the bug that
- * produced this app's only prior "match", androidx.work's own
- * `SystemJobScheduler` boilerplate coincidentally containing the
- * substring `jobscheduler`.
+ * carrying the *current* process's PID (`Process.myPid()`) are excluded
+ * before keyword matching, which is what caught this app's only prior
+ * "match" — androidx.work's own `SystemJobScheduler` boilerplate
+ * coincidentally containing the substring `jobscheduler`. This is a
+ * narrower guarantee than it might read as: it only ever excludes the
+ * currently-running instance, so a line from an *earlier* incarnation of
+ * this same app (same package, different PID, still sitting in the
+ * buffer's history — observed during testing across repeated reinstalls)
+ * can still pass. A `matches` row is evidence worth reading, not proof
+ * the source wasn't still this app.
  *
  * `logcat -T '<MM-DD HH:MM:SS.mmm>'` *is* a durable offset — it returns
  * only lines at or after that timestamp, so the watermark stored in
@@ -135,14 +139,20 @@ class LogcatCollector : Collector {
         }
 
         val editor = prefs.edit()
-        editor.putString(lastLineKey, lines.last())
-        // Only ever store a genuine timestamp - buffer markers like
-        // "--------- beginning of main" don't have one, and if none of
-        // this batch's lines do either, leave the old watermark in place
-        // rather than poison it.
-        val newWatermark = lines.asReversed().firstNotNullOfOrNull { timestampOf(it) }
-        if (newWatermark != null) {
-            editor.putString(lastLogTimeKey, newWatermark)
+        // lastLineKey and lastLogTimeKey must come from the *same* line, or
+        // the boundary-dedup check above (which compares against
+        // lastLineKey) and the -T watermark (which only ever advances to a
+        // validated timestamp) can disagree - e.g. if the batch ends on a
+        // non-timestamped continuation line (ANR/stack-trace), storing that
+        // as lastLineKey while the watermark stays on an earlier line means
+        // next cycle's lines.first() never matches, and the boundary entry
+        // re-emits. Search backward once for the last genuinely timestamped
+        // line and use it for both; a non-timestamped tail is otherwise
+        // just dropped rather than poisoning either watermark.
+        val lastTimestampedLine = lines.asReversed().firstOrNull { timestampOf(it) != null }
+        if (lastTimestampedLine != null) {
+            editor.putString(lastLineKey, lastTimestampedLine)
+            editor.putString(lastLogTimeKey, timestampOf(lastTimestampedLine))
         }
         editor.apply()
 
