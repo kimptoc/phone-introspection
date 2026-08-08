@@ -55,3 +55,15 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }
+
+// T2 (spec §3) adb grants are wiped on every reinstall - wire provisioning
+// into the install task so it can't be silently forgotten (spec §3, §7).
+tasks.register<Exec>("provisionT2") {
+    description = "Grants T2 adb permissions (spec §3): BATTERY_STATS, READ_LOGS, hidden_api_policy."
+    workingDir = rootDir
+    commandLine("scripts/provision.sh")
+}
+
+tasks.matching { it.name == "installDebug" }.configureEach {
+    finalizedBy("provisionT2")
+}

@@ -24,6 +24,12 @@
         android:name="android.permission.BATTERY_STATS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- T2: logcat as a side channel on system behaviour (spec §3). Without
+         this, `logcat` only returns this app's own output. -->
+    <uses-permission
+        android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
+
     <application
         android:allowBackup="false"
         android:icon="@android:drawable/sym_def_app_icon"
