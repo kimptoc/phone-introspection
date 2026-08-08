@@ -8,6 +8,7 @@ import net.kimptoc.introspect.collector.Tier
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
+import java.util.concurrent.TimeUnit
 
 /**
  * Logcat as a side channel on system behaviour (spec §3 T2) — thermal
@@ -22,9 +23,20 @@ import java.io.InputStreamReader
  * [lastLogTimeKey] survives across cycles the same way a query watermark
  * would elsewhere in this app. It's not exact: `-T` can repeat the exact
  * boundary line, so the previous cycle's last raw line is also tracked
- * ([lastLineKey]) and dropped if it reappears first. Runs every
- * [intervalMs] = 5 minutes rather than this app's usual 30, since the
- * main buffer on a busy phone can wrap well inside 30 minutes.
+ * ([lastLineKey]) and dropped if it reappears first. The watermark is only
+ * ever taken from a line that actually parses as a timestamp — logcat can
+ * emit non-timestamped `--------- beginning of main` buffer markers, and
+ * storing one of those verbatim would permanently poison every future
+ * `-T` call. Runs every [intervalMs] = 5 minutes rather than this app's
+ * usual 30, since the main buffer on a busy phone can wrap well inside 30
+ * minutes.
+ *
+ * `logcat -d` is meant to dump-and-exit, but this collector runs
+ * synchronously inside the same sampling cycle as every other collector
+ * (`CollectorRegistry.collectAll`), so a wedged process would stall
+ * battery/thermal/exit-reason collection behind it — [execTimeoutMs]
+ * bounds that, and stdout/stderr are drained on separate threads so a
+ * full stderr pipe can't deadlock a blocked stdout read (or vice versa).
  *
  * Matches are joined into one length-capped row per cycle rather than one
  * row per line, per spec §7's storage-growth caution about logcat/dumpsys
@@ -43,8 +55,11 @@ class LogcatCollector : Collector {
     private val intervalMs = 5 * 60 * 1000L
     private val initialFetchLines = 500
     private val maxJoinedChars = 4000
+    private val execTimeoutMs = 5000L
     private val permission = "android.permission.READ_LOGS"
     private val timePrefixLength = 18 // "MM-DD HH:MM:SS.mmm"
+    private val timestampRegex = Regex("""^\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$""")
+    private val pidRegex = Regex("""\(\s*(\d+)\)""")
 
     private val keywords = listOf(
         "thermal", "lowmemorykiller", "lmkd", "out of memory", "oom",
@@ -72,6 +87,9 @@ class LogcatCollector : Collector {
             return listOf(Sample(now, id, "read_status", valueNum = 0.0, valueText = e.javaClass.simpleName))
         }
 
+        if (result.timedOut) {
+            return listOf(Sample(now, id, "read_status", valueNum = 0.0, valueText = "timeout"))
+        }
         if (result.exitCode != 0) {
             val detail = result.stderr.take(200).ifBlank { "exit=${result.exitCode}" }
             return listOf(Sample(now, id, "read_status", valueNum = 0.0, valueText = detail))
@@ -79,8 +97,16 @@ class LogcatCollector : Collector {
 
         val lines = result.lines
         if (lines.isEmpty()) {
-            return listOf(Sample(now, id, "read_status", valueNum = 0.0, valueText = "ok"))
+            return listOf(Sample(now, id, "read_status", valueNum = 0.0, valueText = "ok lines=0 pids=0"))
         }
+
+        // Distinct PIDs seen is the discriminator between "nothing worth
+        // logging happened" and "we can only see our own process" -
+        // read_status=ok with pids=1 on a busy phone means READ_LOGS/group
+        // membership isn't actually granting cross-process visibility,
+        // which a bare "ok" can't distinguish from a genuinely quiet cycle.
+        val distinctPids = lines.mapNotNull { pidOf(it) }.toSet().size
+        val statusDetail = "lines=${lines.size} pids=$distinctPids"
 
         val lastSeenLine = prefs.getString(lastLineKey, null)
         val freshLines = if (lastLogTime != null && lines.first() == lastSeenLine) {
@@ -91,8 +117,12 @@ class LogcatCollector : Collector {
 
         val editor = prefs.edit()
         editor.putString(lastLineKey, lines.last())
-        val newWatermark = lines.last().take(timePrefixLength)
-        if (newWatermark.length == timePrefixLength) {
+        // Only ever store a genuine timestamp - buffer markers like
+        // "--------- beginning of main" don't have one, and if none of
+        // this batch's lines do either, leave the old watermark in place
+        // rather than poison it.
+        val newWatermark = lines.asReversed().firstNotNullOfOrNull { timestampOf(it) }
+        if (newWatermark != null) {
             editor.putString(lastLogTimeKey, newWatermark)
         }
         editor.apply()
@@ -103,14 +133,27 @@ class LogcatCollector : Collector {
         }
 
         if (matches.isEmpty()) {
-            return listOf(Sample(now, id, "read_status", valueNum = 0.0, valueText = "ok"))
+            return listOf(Sample(now, id, "read_status", valueNum = distinctPids.toDouble(), valueText = "ok $statusDetail"))
         }
 
         val joined = matches.joinToString("\n").takeLast(maxJoinedChars)
-        return listOf(Sample(now, id, "matches", valueNum = matches.size.toDouble(), valueText = joined))
+        return listOf(Sample(now, id, "matches", valueNum = matches.size.toDouble(), valueText = "$statusDetail\n$joined"))
     }
 
-    private data class LogcatResult(val lines: List<String>, val exitCode: Int, val stderr: String)
+    private fun timestampOf(line: String): String? {
+        if (line.length < timePrefixLength) return null
+        val prefix = line.take(timePrefixLength)
+        return if (timestampRegex.matches(prefix)) prefix else null
+    }
+
+    private fun pidOf(line: String): String? = pidRegex.find(line)?.groupValues?.get(1)
+
+    private data class LogcatResult(
+        val lines: List<String>,
+        val exitCode: Int,
+        val stderr: String,
+        val timedOut: Boolean,
+    )
 
     private fun readLogcat(sinceTime: String?): LogcatResult {
         val command = if (sinceTime != null) {
@@ -120,10 +163,28 @@ class LogcatCollector : Collector {
         }
         val process = ProcessBuilder(command).start()
         try {
-            val lines = BufferedReader(InputStreamReader(process.inputStream)).readLines()
-            val stderr = BufferedReader(InputStreamReader(process.errorStream)).readText()
-            val exitCode = process.waitFor()
-            return LogcatResult(lines, exitCode, stderr)
+            var stdoutLines: List<String> = emptyList()
+            var stderrText = ""
+            val stdoutThread = Thread {
+                stdoutLines = BufferedReader(InputStreamReader(process.inputStream)).readLines()
+            }
+            val stderrThread = Thread {
+                stderrText = BufferedReader(InputStreamReader(process.errorStream)).readText()
+            }
+            stdoutThread.start()
+            stderrThread.start()
+
+            val finished = process.waitFor(execTimeoutMs, TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+            }
+            stdoutThread.join(1000)
+            stderrThread.join(1000)
+
+            if (!finished) {
+                return LogcatResult(emptyList(), -1, "", timedOut = true)
+            }
+            return LogcatResult(stdoutLines, process.exitValue(), stderrText, timedOut = false)
         } finally {
             process.destroyForcibly()
         }
