@@ -12,6 +12,7 @@ import net.kimptoc.introspect.collector.t1.NetworkStatsCollector
 import net.kimptoc.introspect.collector.t1.UsageEventsCollector
 import net.kimptoc.introspect.collector.t1.UsageForegroundCollector
 import net.kimptoc.introspect.collector.t2.BatteryAttributionCollector
+import net.kimptoc.introspect.collector.t2.LogcatCollector
 
 /**
  * Every known collector, in one place. [availableCollectors] is re-probed
@@ -32,6 +33,7 @@ object CollectorRegistry {
         NetworkStatsCollector(),
         InstalledPackagesCollector(),
         BatteryAttributionCollector(),
+        LogcatCollector(),
     )
 
     fun availableCollectors(context: Context): List<Collector> =
