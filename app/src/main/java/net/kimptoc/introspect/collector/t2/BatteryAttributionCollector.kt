@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import net.kimptoc.introspect.collector.Collector
 import net.kimptoc.introspect.collector.Sample
 import net.kimptoc.introspect.collector.Tier
+import java.lang.reflect.InvocationTargetException
 
 /**
  * Per-UID battery consumption attribution (spec §3 T2), via
@@ -44,45 +45,59 @@ class BatteryAttributionCollector : Collector {
         val lastRun = prefs.getLong(lastRunKey, 0L)
         if (now - lastRun in 0 until intervalMs) return emptyList()
 
-        // Always write a reflect_status row, success or failure: this signal
+        // Always advance the watermark, success or failure: a persistent
+        // failure (wrong OS version, reflection blocked) must not retry
+        // every ~60s sampling tick forever - that's up to 1,440 rows/day
+        // of the same failure, which is its own storage-growth problem
+        // (spec §7). One reflect_status row per 30 min either way.
+        prefs.edit().putLong(lastRunKey, now).apply()
+
+        // reflect_status is always emitted, success or failure: this signal
         // depends on hidden_api_policy as well as the permission (see class
         // doc), and a silent, permanently-empty collector is exactly what
         // spec §2/§7 says a tier must never do. "T2: live" in the UI only
         // means the permission is granted, not that reflection is working.
-        val samples = try {
+        return try {
             val snapshot = readSnapshot(context, now)
             snapshot + Sample(now, id, "reflect_status", valueNum = snapshot.size.toDouble(), valueText = "ok")
         } catch (e: ReflectiveOperationException) {
-            // Don't advance the watermark on failure — a transient reflection
-            // error shouldn't burn the 30-minute window before the next try.
-            return listOf(Sample(now, id, "reflect_status", valueNum = 0.0, valueText = e.javaClass.simpleName))
+            listOf(Sample(now, id, "reflect_status", valueNum = 0.0, valueText = statusText(e)))
         } catch (e: SecurityException) {
-            return listOf(Sample(now, id, "reflect_status", valueNum = 0.0, valueText = e.javaClass.simpleName))
+            listOf(Sample(now, id, "reflect_status", valueNum = 0.0, valueText = statusText(e)))
         } catch (e: RuntimeException) {
-            return listOf(Sample(now, id, "reflect_status", valueNum = 0.0, valueText = e.javaClass.simpleName))
+            listOf(Sample(now, id, "reflect_status", valueNum = 0.0, valueText = statusText(e)))
         }
+    }
 
-        prefs.edit().putLong(lastRunKey, now).apply()
-        return samples
+    /**
+     * `Method.invoke()` wraps whatever the target threw in an
+     * `InvocationTargetException` - reporting that class name alone would
+     * always say "InvocationTargetException" and hide the actual cause
+     * (e.g. a `NoSuchMethodException` chained from inside the framework
+     * call). Unwrap it so reflect_status names the real failure.
+     */
+    private fun statusText(e: Throwable): String {
+        val real = if (e is InvocationTargetException) e.cause ?: e else e
+        val message = real.message?.take(100)
+        return if (message.isNullOrBlank()) real.javaClass.simpleName else "${real.javaClass.simpleName}: $message"
     }
 
     private fun readSnapshot(context: Context, now: Long): List<Sample> {
-        val manager = context.getSystemService(serviceName) ?: return emptyList()
+        val manager = context.getSystemService(serviceName)
+            ?: error("getSystemService(\"$serviceName\") returned null")
 
         val stats = manager.javaClass.getMethod("getBatteryUsageStats").invoke(manager)
-            ?: return emptyList()
+            ?: error("getBatteryUsageStats() returned null")
 
         @Suppress("UNCHECKED_CAST")
-        val consumers = stats.javaClass.getMethod("getUidBatteryConsumers")
-            .invoke(stats) as? List<Any>
-            ?: return emptyList()
+        val consumers = stats.javaClass.getMethod("getUidBatteryConsumers").invoke(stats) as? List<Any>
+            ?: error("getUidBatteryConsumers() returned non-List or null")
 
         val pm = context.packageManager
         val samples = mutableListOf<Sample>()
         for (consumer in consumers) {
             val consumerClass = consumer.javaClass
-            val consumedPower = consumerClass.getMethod("getConsumedPower")
-                .invoke(consumer) as? Double
+            val consumedPower = consumerClass.getMethod("getConsumedPower").invoke(consumer) as? Double
                 ?: continue
             if (consumedPower <= 0.0) continue
 
