@@ -340,13 +340,44 @@ the July security patch already flagged as a confound above, though
 that's not confirmed (One UI feature updates and monthly security
 patches often ship together, but aren't necessarily the same change).
 
+## 2026-08-08: measurable improvement after storage cleanup + game restrictions + dongle unplugged
+
+Compared discharge segments before vs. after 2026-08-07's changes
+(both games set to Restricted, storage cleared above 10%, and the
+Android Auto dongle physically unplugged from the car):
+
+| Metric | Before (08-05/06) | After (08-07/08) |
+|---|---|---|
+| Overnight drain rate | -10.8%/hr | **-5.6%/hr** |
+| Morning drain rate | -18.6%/hr | **-5.5%/hr** |
+| Overnight Doze engagement | 0% | **39%** |
+| Morning Doze engagement | 2% | **51%** |
+| Screen-on time | 78–100% | ~47% |
+| Android Auto reconnects/day | 232 (08-06) | 52 (08-07) |
+
+The Doze-engagement jump (0–2% → 39–51%) is the most telling number —
+that's the mechanism flagged as broken in the very first drain
+investigation (2026-08-06) actually functioning again, not just
+"screen was off more." Drain rates now land at -5.5 to -5.6%/hr,
+matching or beating the "5–7%/hr idle" baseline that was the
+known-bad symptom for *other* affected users in the NotebookCheck
+report. Can't cleanly separate how much is the Restricted-app setting
+vs. reduced usage over these two days, since both happened together —
+but the Doze mechanism itself working again is a structural change,
+not a usage artifact.
+
+The Android Auto reconnect drop (232→52/day) has a clean, confirmed
+cause: the user physically unplugged the dongle from the car on
+2026-08-07, rather than anything phone-side. Consistent with the
+2026-08-07 finding that this was likely a One UI 8.5 software
+regression rather than a phone-setting-fixable issue — removing the
+dongle sidesteps it rather than resolving it.
+
 ## Next
 
-- User to clear storage (podcast downloads) and monitor per Samsung's
-  ask; check back on whether the memory/dongle fixes + storage headroom
-  measurably change the drain pattern.
-- Mention the One UI 8.5 Android Auto corroboration to Samsung support
-  alongside the existing thread — it's independent evidence for a
-  software-side root cause, not just this one phone's anecdote.
-- Phase 3 (T2 + provisioning script) per spec §6, once the above
-  monitoring window closes and there's runway to pick it up.
+- Keep monitoring — if the improved Doze/drain numbers hold for
+  several more days, that's a good signal for the Samsung thread; if
+  they regress, worth checking whether the games crept back to
+  Optimised or something else changed.
+- Phase 3 (T2 + provisioning script) per spec §6, once there's runway
+  to pick it up.
