@@ -2,6 +2,7 @@ package net.kimptoc.introspect.collector.t2
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.os.Process
 import net.kimptoc.introspect.collector.Collector
 import net.kimptoc.introspect.collector.Sample
 import net.kimptoc.introspect.collector.Tier
@@ -13,10 +14,27 @@ import java.util.concurrent.TimeUnit
 /**
  * Logcat as a side channel on system behaviour (spec §3 T2) — thermal
  * daemon, low-memory-killer, JobScheduler and Doze/ANR decisions, none of
- * which are otherwise queryable from an app. `READ_LOGS` (adb-granted,
- * scripts/provision.sh) is a plain permission check, not a hidden-API
- * problem like [BatteryAttributionCollector] — without it, `logcat` only
- * returns this app's own output, not other processes'.
+ * which are otherwise queryable from an app.
+ *
+ * **Confirmed non-functional for cross-process visibility on this
+ * device** (Samsung Galaxy S25 Ultra, Android 16, One UI 8.5, 2026-07-05
+ * patch), despite following the documented path exactly: `READ_LOGS`
+ * declared in the manifest, granted via `scripts/provision.sh`, confirmed
+ * `granted=true`, and the running process confirmed to hold gid 1007
+ * (`log`, matching `platform.xml`'s `READ_LOGS` → `gid="log"` mapping) via
+ * `/proc/<pid>/status`. Over a 9-hour, 110-cycle on-device run, every
+ * single line ever read carried this app's own PID — `pids=1` throughout,
+ * against 10 distinct PIDs visible to the shell UID over the same buffer.
+ * Unlike [BatteryAttributionCollector]'s `hidden_api_policy` coupling,
+ * there is no known complementary unlock for this one; it appears the
+ * platform (AOSP hardening, Samsung SELinux, or both) restricts `logd`
+ * read access below what the documented permission model implies. Lines
+ * are still filtered to `Process.myPid()` before keyword matching, so a
+ * `matches` row means "genuinely from another process" by construction,
+ * not "self-noise that happened to contain a keyword" — the bug that
+ * produced this app's only prior "match", androidx.work's own
+ * `SystemJobScheduler` boilerplate coincidentally containing the
+ * substring `jobscheduler`.
  *
  * `logcat -T '<MM-DD HH:MM:SS.mmm>'` *is* a durable offset — it returns
  * only lines at or after that timestamp, so the watermark stored in
@@ -29,7 +47,10 @@ import java.util.concurrent.TimeUnit
  * storing one of those verbatim would permanently poison every future
  * `-T` call. Runs every [intervalMs] = 5 minutes rather than this app's
  * usual 30, since the main buffer on a busy phone can wrap well inside 30
- * minutes.
+ * minutes. This cadence and the watermark logic are both confirmed
+ * working correctly on-device (lines varying 0-118 per cycle, no
+ * flooding/repeats over 110 consecutive cycles) — it's specifically the
+ * cross-process visibility that doesn't work, not the collector mechanics.
  *
  * `logcat -d` is meant to dump-and-exit, but this collector runs
  * synchronously inside the same sampling cycle as every other collector
@@ -40,9 +61,7 @@ import java.util.concurrent.TimeUnit
  *
  * Matches are joined into one length-capped row per cycle rather than one
  * row per line, per spec §7's storage-growth caution about logcat/dumpsys
- * raw text specifically. None of this app's own logging currently uses
- * any of [keywords] as of writing — if that changes, this collector would
- * start capturing its own output.
+ * raw text specifically.
  */
 class LogcatCollector : Collector {
     override val id = "logcat"
@@ -127,9 +146,9 @@ class LogcatCollector : Collector {
         }
         editor.apply()
 
+        val myPid = Process.myPid().toString()
         val matches = freshLines.filter { line ->
-            val lower = line.lowercase()
-            keywords.any { lower.contains(it) }
+            pidOf(line) != myPid && keywords.any { line.lowercase().contains(it) }
         }
 
         if (matches.isEmpty()) {
