@@ -17,6 +17,13 @@
         tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
+    <!-- T2: adb-granted only, not exposed through any Settings screen (spec §3).
+         Must be declared here or `adb shell pm grant` fails with "has not
+         requested permission". Wiped on reinstall — see scripts/provision.sh. -->
+    <uses-permission
+        android:name="android.permission.BATTERY_STATS"
+        tools:ignore="ProtectedPermissions" />
+
     <application
         android:allowBackup="false"
         android:icon="@android:drawable/sym_def_app_icon"

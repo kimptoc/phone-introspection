@@ -88,6 +88,8 @@ adb shell settings put global hidden_api_policy 1
 - `READ_LOGS` → logcat as a side channel on system behaviour (thermal daemon, LMK, JobScheduler decisions).
 - `WRITE_SECURE_SETTINGS` → sets `hidden_api_policy`, which in turn unblocks reflective access to `@hide` APIs.
 
+**`BatteryStatsManager` is not actually a two-line integration.** `BatteryStatsManager`, `BatteryUsageStats` and `UidBatteryConsumer` are all `@SystemApi` — confirmed absent from the public SDK stub jars for API 33 through 36, so there is nothing to compile against directly. Reaching them means reflecting into hidden framework classes via `context.getSystemService("batterystats")` and `Class.getMethod(...)`, and that reflection is itself blocked by Android's hidden-API enforcement unless `hidden_api_policy` is relaxed. In other words, the `BATTERY_STATS` bullet above and the `hidden_api_policy` bullet below aren't independent unlocks for this signal — you need both together, or `getUidBatteryConsumers()` throws/returns nothing even with the permission granted. `WRITE_SECURE_SETTINGS` does *not* need to be granted to the app itself for this: `adb shell settings put global hidden_api_policy 1` runs as shell, which already holds that permission, and it's a device-global setting, not one scoped to the app's own package.
+
 **These grants survive reboot but are wiped on reinstall.** Put them in `scripts/provision.sh` and call it from the install task, or you will silently lose T2 on the next build.
 
 ### T3 — Shizuku
