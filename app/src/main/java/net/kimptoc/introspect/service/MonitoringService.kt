@@ -23,6 +23,7 @@ import net.kimptoc.introspect.collector.CollectorRegistry
 import net.kimptoc.introspect.collector.Sample
 import net.kimptoc.introspect.db.AppDatabase
 import net.kimptoc.introspect.db.SampleEntity
+import net.kimptoc.introspect.shizuku.ShizukuManager
 
 /**
  * Foreground service running the event-driven and periodic-sample
@@ -48,6 +49,11 @@ class MonitoringService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
         registerEventListeners()
         startSamplingLoop()
+        // Kick off the T3 UserService bind now, not lazily on the first
+        // gated collect() call - binding is async, and starting it here
+        // means it's likely already connected by the time SensorServiceCollector's
+        // hourly gate first lets it run.
+        ShizukuManager.prewarm()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY

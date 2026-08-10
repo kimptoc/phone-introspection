@@ -33,6 +33,7 @@ android {
 
     buildFeatures {
         buildConfig = true
+        aidl = true
     }
 }
 
@@ -54,6 +55,11 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+
+    // T3 (spec §3): shell-privileged dumpsys access via a running Shizuku
+    // instance, no root required.
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }
 
 // T2 (spec §3) adb grants are wiped on every reinstall - wire provisioning

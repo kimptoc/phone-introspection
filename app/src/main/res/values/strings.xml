@@ -9,6 +9,7 @@
     <string name="export_csv">Export CSV</string>
     <string name="request_battery_exemption">Exempt from battery optimisation</string>
     <string name="grant_usage_access">Grant usage access</string>
+    <string name="grant_shizuku_access">Grant Shizuku access</string>
     <string name="battery_threshold_channel_name">Battery threshold alerts</string>
     <string name="battery_threshold_title">Battery threshold reached</string>
     <string name="battery_threshold_text">Battery dropped to %d%%</string>
