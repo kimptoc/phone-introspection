@@ -70,11 +70,11 @@ object ShizukuManager {
     }
 
     fun isPermissionGranted(): Boolean {
-        return try {
-            !Shizuku.isPreV11() && Shizuku.pingBinder() &&
-                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        try {
+            if (Shizuku.isPreV11() || !Shizuku.pingBinder()) return false
+            return Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
         } catch (e: Throwable) {
-            false
+            return false
         }
     }
 
