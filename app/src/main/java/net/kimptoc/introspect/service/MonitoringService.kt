@@ -17,6 +17,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.kimptoc.introspect.MainActivity
 import net.kimptoc.introspect.R
 import net.kimptoc.introspect.collector.CollectorRegistry
@@ -34,6 +36,20 @@ class MonitoringService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var thermalListener: PowerManager.OnThermalStatusChangedListener? = null
+
+    // The periodic loop and each event listener (battery/screen/thermal)
+    // all launch independent coroutines that call collectAndPersist() on
+    // Dispatchers.Default, which has multiple threads - near-simultaneous
+    // triggers (typically right at startup, when a sticky battery
+    // broadcast, the periodic loop's first tick, and a thermal callback can
+    // all fire within milliseconds of each other) can genuinely run
+    // concurrently. Each collector's own watermark gate assumes it only
+    // ever sees one collect() call at a time; without this lock, two
+    // concurrent calls can both read the same stale watermark before
+    // either writes it back, producing duplicate rows - observed directly
+    // as 2-3x duplicate T3 dumpsys rows on startup (expensive at ~150KB
+    // each for batterystats, not just a minor inefficiency).
+    private val collectMutex = Mutex()
 
     private val eventReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -96,9 +112,9 @@ class MonitoringService : Service() {
         scope.launch { collectAndPersist() }
     }
 
-    private suspend fun collectAndPersist() {
+    private suspend fun collectAndPersist() = collectMutex.withLock {
         val samples = CollectorRegistry.collectAll(this)
-        if (samples.isEmpty()) return
+        if (samples.isEmpty()) return@withLock
         AppDatabase.get(this).sampleDao().insertAll(samples.map { it.toEntity() })
     }
 

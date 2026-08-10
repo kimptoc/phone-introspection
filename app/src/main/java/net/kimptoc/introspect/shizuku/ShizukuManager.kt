@@ -27,7 +27,7 @@ import rikka.shizuku.Shizuku
  */
 object ShizukuManager {
     private const val PACKAGE_NAME = "net.kimptoc.introspect"
-    private const val userServiceVersion = 3
+    private const val userServiceVersion = 4
 
     @Volatile private var binder: IDumpsysService? = null
     @Volatile private var binding = false
@@ -99,7 +99,7 @@ object ShizukuManager {
      * state, not a failure, the same distinction `read_status` needed for
      * [net.kimptoc.introspect.collector.t2.LogcatCollector].
      */
-    fun dumpsys(service: String, timeoutMs: Int = 5000, maxChars: Int = 200_000): DumpsysResult {
+    fun dumpsys(service: String, args: Array<String> = emptyArray(), timeoutMs: Int = 5000, maxChars: Int = 200_000): DumpsysResult {
         if (!isPermissionGranted()) return DumpsysResult.NotPermitted
 
         val current = binder
@@ -109,7 +109,7 @@ object ShizukuManager {
         }
 
         return try {
-            val text = current.dumpsys(service, timeoutMs, maxChars)
+            val text = current.dumpsys(service, args, timeoutMs, maxChars)
             if (text.startsWith("ERROR")) DumpsysResult.Error(text) else DumpsysResult.Success(text)
         } catch (e: Exception) {
             binder = null
