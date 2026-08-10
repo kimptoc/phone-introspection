@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
@@ -21,10 +22,15 @@ import net.kimptoc.introspect.collector.t1.UsageAccess
 import net.kimptoc.introspect.export.CsvExporter
 import net.kimptoc.introspect.service.MonitoringService
 import net.kimptoc.introspect.service.SamplingWorker
+import net.kimptoc.introspect.shizuku.ShizukuManager
+import rikka.shizuku.Shizuku
 
 class MainActivity : ComponentActivity() {
 
     private var serviceRunning = false
+
+    private val shizukuPermissionListener =
+        Shizuku.OnRequestPermissionResultListener { _, _ -> refreshTierStatus() }
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -43,7 +49,10 @@ class MainActivity : ComponentActivity() {
         val exemptionButton = findViewById<Button>(R.id.batteryExemptionButton)
         val exportButton = findViewById<Button>(R.id.exportButton)
         val usageAccessButton = findViewById<Button>(R.id.usageAccessButton)
+        val shizukuAccessButton = findViewById<Button>(R.id.shizukuAccessButton)
         val statusText = findViewById<TextView>(R.id.serviceStatusText)
+
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
         toggleButton.setOnClickListener {
             if (serviceRunning) {
@@ -66,12 +75,19 @@ class MainActivity : ComponentActivity() {
 
         usageAccessButton.setOnClickListener { requestUsageAccessIfNeeded() }
 
+        shizukuAccessButton.setOnClickListener { requestShizukuAccessIfNeeded() }
+
         refreshTierStatus()
     }
 
     override fun onResume() {
         super.onResume()
         refreshTierStatus()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
     }
 
     private fun refreshTierStatus() {
@@ -104,6 +120,14 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
     }
 
+    private fun requestShizukuAccessIfNeeded() {
+        if (ShizukuManager.isPermissionGranted()) return
+        val requested = ShizukuManager.requestPermission(SHIZUKU_REQUEST_CODE)
+        if (!requested) {
+            Toast.makeText(this, "Shizuku isn't running - install/start it first", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun exportTo(uri: Uri) {
         lifecycleScope.launch {
             CsvExporter.export(this@MainActivity, uri)
@@ -127,5 +151,9 @@ class MainActivity : ComponentActivity() {
             )
             insets
         }
+    }
+
+    private companion object {
+        const val SHIZUKU_REQUEST_CODE = 1001
     }
 }
