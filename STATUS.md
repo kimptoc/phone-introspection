@@ -441,16 +441,81 @@ sitting in the DB shows the old bug's signature clearly: the same
 package repeating an identical ~6-hour delta across ten consecutive
 30-minute cycles.
 
+## 2026-08-11: Phase 4 (T3) started — Shizuku set up, sensorservice collector shipped
+
+Shizuku wasn't available through the Play Store on this device ("made
+for an older version of Android" — a device-compatibility filter
+issue, not an actual incompatibility). Sideloaded the APK directly
+from Shizuku's GitHub releases instead, consistent with how this whole
+app is distributed. Paired via wireless debugging and confirmed the
+server running under the **shell** UID (`ps -A` showed `shizuku_server`
+as `shell`, not the app's own restricted UID) — that's what makes T3
+fundamentally different from T2's `LogcatCollector`, which stayed
+sandboxed to its own process no matter what permission was granted.
+
+**Architecture is a real departure from T0-T2.** `Shizuku.newProcess()`
+is deprecated in the current API in favour of an AIDL-defined
+`UserService`, bound asynchronously via `bindUserService()` and run in
+a process Shizuku's server itself spawns. `ShizukuManager` holds the
+bound binder as a singleton across `collect()` calls rather than
+forcing an async bind into the synchronous `Collector` interface.
+`daemon(true)` keeps the UserService alive across this app's own
+process restarts, since Samsung killing the app is the normal case
+here (spec §7), not the exception.
+
+**`SensorServiceCollector`** (first T3 signal, PR #10): raw
+`dumpsys sensorservice` output, capped at 20,000 chars, hourly cadence.
+Verified on-device: `T3: live` after granting Shizuku access, real
+20K-char dump captured on the first cycle, including exactly the
+`step_counter active-count / sampling_period / batching_period` detail
+spec §8 flags as useful for the step-counter debugging problem.
+
+**Bot review caught 6 real bugs**, all fixed before merge:
+- The hourly watermark was being consumed by a transient `NotBoundYet`
+  result, burning a full hour waiting on a bind that normally
+  finishes in seconds — partially undoing the same PR's prewarm fix.
+- A genuine data race: `StringBuilder` written by a reader thread, read
+  by the caller after a `join(1000)` that gives no happens-before
+  guarantee if the thread hadn't actually finished.
+- The reader thread had no exception handling — an uncaught throw
+  there could take down the whole daemon process, not just fail one
+  collection.
+- stderr was never drained in `DumpsysService`'s exec — the same
+  deadlock class already fixed once in `LogcatCollector`'s exec,
+  reintroduced here by not remembering the earlier fix.
+- `onServiceDisconnected` didn't reset the `binding` flag, so a bind
+  failure that fires disconnect without ever connecting first would
+  permanently lock out all future bind attempts.
+- The "Grant Shizuku access" button silently did nothing when Shizuku
+  wasn't installed/running — no user feedback at all.
+
+One bot finding was incorrect (a claimed inversion in the pre-v11
+Shizuku version check) — verified against the reference Shizuku demo's
+own code, which matches this app's logic exactly. Pushed back on the
+PR thread rather than "fixing" correct code, though the two functions'
+phrasing was aligned anyway since the bot flagged it as worth
+resolving for consistency.
+
+**Real environmental finding, unrelated to the code**: Shizuku's
+server died independently mid-session, tied to a wireless-adb
+disconnect (not anything in the app). The manager app stayed running
+but `shizuku_server` itself stopped. Recovered cleanly after
+restarting Shizuku from its own app — the permission grant survived,
+T3 went back to live, and the UserService rebound correctly. Worth
+knowing this is a live dependency that can drop independently of the
+phone or this app, not just a one-time setup step.
+
 ## Next
 
 - Keep monitoring the post-2026-08-07 improvement (Doze engagement,
   drain rate) — if it holds for several more days that's a good signal
   for the Samsung thread; if it regresses, check whether the games
   crept back to Optimised or something else changed.
-- Phase 4 (T3 — Shizuku) per spec §6: `dumpsys` collectors, starting
-  with `sensorservice`/`batterystats`. Needs Shizuku installed and
-  paired on-device first (separate app, wireless-debugging pairing) —
-  that's setup on the user's side before this can be picked up.
+- `dumpsys batterystats` as a second T3 collector — natural follow-on
+  now the Shizuku mechanism is proven. Larger dump than sensorservice
+  (multi-MB vs ~266KB), needs the streaming-cap approach already built
+  for `DumpsysService`, plus probably `--charged` or a longer cadence
+  given spec §7's storage caution.
 - Phase 5 (UI): timeline view aligning app sessions against thermal
   state and battery drain. No new device access needed; could be
-  started independently of Shizuku setup.
+  started independently of T3 work.
