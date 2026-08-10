@@ -48,14 +48,23 @@ class SensorServiceCollector : Collector {
         val now = System.currentTimeMillis()
         val lastRun = prefs.getLong(lastRunKey, 0L)
         if (now - lastRun in 0 until intervalMs) return emptyList()
+
+        val result = ShizukuManager.dumpsys("sensorservice", maxChars = maxChars)
+
+        // NotBoundYet is a one-time startup condition, not a completed
+        // attempt - advancing the hourly watermark for it would burn the
+        // entire gate waiting on a bind that normally finishes in seconds,
+        // undoing most of what prewarming from MonitoringService.onCreate()
+        // was for. Only a real completed attempt (data or a genuine
+        // failure) consumes the interval; NotBoundYet retries next cycle.
+        if (result is DumpsysResult.NotBoundYet) {
+            return listOf(Sample(now, id, "dump_status", valueNum = 0.0, valueText = "not_bound_yet"))
+        }
         prefs.edit().putLong(lastRunKey, now).apply()
 
-        return when (val result = ShizukuManager.dumpsys("sensorservice", maxChars = maxChars)) {
+        return when (result) {
             is DumpsysResult.Success -> listOf(
                 Sample(now, id, "dump", valueNum = result.text.length.toDouble(), valueText = result.text),
-            )
-            is DumpsysResult.NotBoundYet -> listOf(
-                Sample(now, id, "dump_status", valueNum = 0.0, valueText = "not_bound_yet"),
             )
             is DumpsysResult.NotPermitted -> listOf(
                 Sample(now, id, "dump_status", valueNum = 0.0, valueText = "not_permitted"),
@@ -63,6 +72,7 @@ class SensorServiceCollector : Collector {
             is DumpsysResult.Error -> listOf(
                 Sample(now, id, "dump_status", valueNum = 0.0, valueText = result.detail),
             )
+            is DumpsysResult.NotBoundYet -> emptyList() // unreachable, handled above
         }
     }
 }

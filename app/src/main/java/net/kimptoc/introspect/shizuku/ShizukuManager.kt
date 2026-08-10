@@ -27,7 +27,7 @@ import rikka.shizuku.Shizuku
  */
 object ShizukuManager {
     private const val PACKAGE_NAME = "net.kimptoc.introspect"
-    private const val userServiceVersion = 2
+    private const val userServiceVersion = 3
 
     @Volatile private var binder: IDumpsysService? = null
     @Volatile private var binding = false
@@ -47,7 +47,12 @@ object ShizukuManager {
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
+            // If a bind attempt fails outright, Shizuku can call this
+            // without ever calling onServiceConnected first - if binding
+            // isn't reset here too, that leaves it permanently true and
+            // ensureBinding()'s guard locks out every future attempt.
             binder = null
+            binding = false
         }
     }
 
@@ -73,11 +78,16 @@ object ShizukuManager {
         }
     }
 
-    /** Must be called from an Activity - shows a system permission dialog. */
-    fun requestPermission(requestCode: Int) {
-        if (!Shizuku.isPreV11() && Shizuku.pingBinder()) {
-            Shizuku.requestPermission(requestCode)
-        }
+    /**
+     * Must be called from an Activity - shows a system permission dialog.
+     * Returns false if there was nothing to request (Shizuku not installed,
+     * not running, or too old), so the caller can tell the user why nothing
+     * happened rather than the button silently no-op'ing.
+     */
+    fun requestPermission(requestCode: Int): Boolean {
+        if (Shizuku.isPreV11() || !Shizuku.pingBinder()) return false
+        Shizuku.requestPermission(requestCode)
+        return true
     }
 
     /**
