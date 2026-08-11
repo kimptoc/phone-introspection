@@ -68,12 +68,14 @@ class DeviceIdleCollector : Collector {
                 val samples = mutableListOf(
                     Sample(now, id, "dump", valueNum = result.text.length.toDouble(), valueText = result.text),
                 )
-                // DumpsysService returns exactly maxChars when the cap was
-                // hit (it substrings to that length), or fewer if the dump
-                // was genuinely smaller - so equality is a reliable signal
-                // the tail state fields this collector exists for were cut
-                // off, not just "a big dump happened to land on this size."
-                if (result.text.length >= maxChars) {
+                // result.truncated is computed by DumpsysService against the
+                // real pre-truncation length, not re-derived here from the
+                // returned string's length - a length check downstream can't
+                // tell "capped" from "a genuine dump that happened to land
+                // at exactly maxChars" apart, since both produce the same
+                // length. DumpsysService is the only place that actually
+                // knows which one happened.
+                if (result.truncated) {
                     samples += Sample(now, id, "dump_status", valueNum = 1.0, valueText = "truncated")
                 }
                 samples

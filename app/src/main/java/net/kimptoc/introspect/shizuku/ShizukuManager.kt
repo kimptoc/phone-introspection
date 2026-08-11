@@ -27,7 +27,7 @@ import rikka.shizuku.Shizuku
  */
 object ShizukuManager {
     private const val PACKAGE_NAME = "net.kimptoc.introspect"
-    private const val userServiceVersion = 4
+    private const val userServiceVersion = 5
 
     @Volatile private var binder: IDumpsysService? = null
     @Volatile private var binding = false
@@ -109,8 +109,9 @@ object ShizukuManager {
         }
 
         return try {
-            val text = current.dumpsys(service, args, timeoutMs, maxChars)
-            if (text.startsWith("ERROR")) DumpsysResult.Error(text) else DumpsysResult.Success(text)
+            val truncatedFlag = BooleanArray(1)
+            val text = current.dumpsys(service, args, timeoutMs, maxChars, truncatedFlag)
+            if (text.startsWith("ERROR")) DumpsysResult.Error(text) else DumpsysResult.Success(text, truncatedFlag[0])
         } catch (e: Exception) {
             binder = null
             DumpsysResult.Error(e.javaClass.simpleName)
@@ -132,6 +133,6 @@ object ShizukuManager {
 sealed class DumpsysResult {
     data object NotPermitted : DumpsysResult()
     data object NotBoundYet : DumpsysResult()
-    data class Success(val text: String) : DumpsysResult()
+    data class Success(val text: String, val truncated: Boolean) : DumpsysResult()
     data class Error(val detail: String) : DumpsysResult()
 }

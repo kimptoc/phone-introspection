@@ -23,7 +23,7 @@ class DumpsysService : IDumpsysService.Stub() {
         exitProcess(0)
     }
 
-    override fun dumpsys(service: String, args: Array<String>, timeoutMs: Int, maxChars: Int): String {
+    override fun dumpsys(service: String, args: Array<String>, timeoutMs: Int, maxChars: Int, truncated: BooleanArray): String {
         // String[] rather than a space-joined String: no parsing/splitting
         // ambiguity (a double space would've produced an empty-string arg),
         // and ProcessBuilder's list form means each element reaches exec()
@@ -85,7 +85,16 @@ class DumpsysService : IDumpsysService.Stub() {
             if (!finished) return "ERROR timeout"
             readerFailed?.let { return "ERROR $it" }
             if (process.exitValue() != 0) return "ERROR exit=${process.exitValue()}"
-            return if (sb.length > maxChars) sb.substring(0, maxChars) else sb.toString()
+
+            // This is the only place that ever sees the pre-truncation
+            // length, so it's the only place that can say for certain
+            // whether the cap actually cut anything - a downstream
+            // length-of-the-returned-string check can't distinguish
+            // "capped" from "a genuine dump that happened to land at
+            // exactly maxChars", since both produce the same-length result.
+            val wasTruncated = sb.length > maxChars
+            if (truncated.isNotEmpty()) truncated[0] = wasTruncated
+            return if (wasTruncated) sb.substring(0, maxChars) else sb.toString()
         } catch (e: Exception) {
             return "ERROR ${e.javaClass.simpleName}"
         } finally {
