@@ -50,6 +50,14 @@ class UsageEventsCollector : Collector {
         // internal usage-stats file rotation reads the same record from
         // both the old and new file. Dedup by identity within this call's
         // result rather than trusting the OS stream to be duplicate-free.
+        //
+        // Key intentionally matches Sample's own identity (timestamp +
+        // package + type), not the OS event's full identity - the OS also
+        // carries className/instanceId, so two genuinely different events
+        // (same package/ms/type, different activity) would collapse here.
+        // That's fine: Sample doesn't persist className, so two such
+        // events would produce byte-identical rows anyway - there's
+        // nothing downstream that "different" distinction could preserve.
         val seen = HashSet<Triple<Long, String?, Int>>()
         var maxTimestamp = lastSeen
         val event = UsageEvents.Event()
