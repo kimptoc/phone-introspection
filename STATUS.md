@@ -505,17 +505,65 @@ T3 went back to live, and the UserService rebound correctly. Worth
 knowing this is a live dependency that can drop independently of the
 phone or this app, not just a one-time setup step.
 
+## 2026-08-11: second T3 collector (`batterystats`) — and a real concurrency bug surfaced by it
+
+**`BatteryStatsCollector`** (PR #11): raw `dumpsys batterystats --charged`
+output — spec.md's T3 row names this signal first ("Historical
+per-UID wakelocks, CPU time, sensor time"), and it's genuinely
+different data from `BatteryAttributionCollector`'s `BatteryStatsManager`
+reflection, which only gives a flat mAh figure per UID with no
+wakelock/CPU breakdown. Checked the real dump's structure on-device
+before picking a cap (spec §7: decide deliberately, not after seeing
+the DB size) — full dump is 1.7MB, `--charged` is 550KB, and the
+per-UID power summary plus kernel wake lock sections both live in
+roughly the first 150,000 characters, so that's the cap, at a 2-hour
+cadence (vs `sensorservice`'s hourly) to keep storage growth in check
+given the much bigger payload.
+
+**A genuine cross-collector concurrency bug surfaced along the way.**
+`MonitoringService`'s periodic loop and its event listeners
+(battery/screen/thermal) all launch independent coroutines on a
+multi-threaded dispatcher — near-simultaneous triggers at startup
+(typically a sticky battery broadcast landing within milliseconds of
+the periodic loop's first tick) could genuinely run `collectAll()`
+concurrently. Every collector's watermark gate assumes only one
+`collect()` call at a time, so two concurrent callers could both read
+the same stale watermark before either wrote it back — observed
+directly as 2-3x duplicate `dump` rows on startup. Cheap for
+`sensorservice` (~20KB each), expensive at 150KB × 3 for
+`batterystats`, which is what made it worth fixing now rather than
+deferring again (it was flagged as a known gap in PR #10 and left
+alone there).
+
+Took two rounds to actually close: the first fix added a `Mutex`
+scoped to `MonitoringService`, but bot review caught that
+`SamplingWorker` — the 15-minute WorkManager fallback — calls the same
+collectors on its own independent schedule, completely bypassing a
+lock that only guarded one of the two entry points. Fixed properly by
+moving the lock into `CollectorRegistry.collectAllLocked()`, the one
+choke point both callers actually share, then made the old unlocked
+`collectAll()` private so a future caller can't accidentally bypass it
+by reaching for the shorter name. Verified on-device: zero same-key
+duplicate rows across a fresh startup burst, after two prior startups
+had shown 2x and 3x duplicates respectively.
+
+**Found but explicitly not fixed**: `UsageEventsCollector` emits
+genuinely identical triplicate rows for the same package at the same
+timestamp — confirmed unrelated to the concurrency bug above (same
+`value_num`/`value_text`, not a race artifact), a separate pre-existing
+issue in that collector's own event-processing logic. Filed as its own
+issue rather than scope-creeping the batterystats PR.
+
 ## Next
 
+- File and pick up the `UsageEventsCollector` triplicate-row bug.
+- More T3 collectors: spec §3 T3 also lists `cpuinfo`, `deviceidle`,
+  and `power` (wakelock holders) as available via the same Shizuku
+  mechanism now that it's proven twice over.
 - Keep monitoring the post-2026-08-07 improvement (Doze engagement,
   drain rate) — if it holds for several more days that's a good signal
   for the Samsung thread; if it regresses, check whether the games
   crept back to Optimised or something else changed.
-- `dumpsys batterystats` as a second T3 collector — natural follow-on
-  now the Shizuku mechanism is proven. Larger dump than sensorservice
-  (multi-MB vs ~266KB), needs the streaming-cap approach already built
-  for `DumpsysService`, plus probably `--charged` or a longer cadence
-  given spec §7's storage caution.
 - Phase 5 (UI): timeline view aligning app sessions against thermal
   state and battery drain. No new device access needed; could be
   started independently of T3 work.
