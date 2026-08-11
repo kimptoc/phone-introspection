@@ -1,6 +1,8 @@
 package net.kimptoc.introspect.collector
 
 import android.content.Context
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.kimptoc.introspect.collector.t0.BatteryCollector
 import net.kimptoc.introspect.collector.t0.BootCollector
 import net.kimptoc.introspect.collector.t0.DozeScreenCollector
@@ -51,4 +53,18 @@ object CollectorRegistry {
 
     fun collectAll(context: Context): List<Sample> =
         availableCollectors(context).flatMap { it.collect(context) }
+
+    // MonitoringService's periodic loop, its event listeners, and
+    // SamplingWorker's independent 15-minute WorkManager tick are all
+    // separate entry points into collectAll() that can run concurrently -
+    // each collector's own watermark gate assumes only one collect() call
+    // at a time, so two concurrent callers can both read the same stale
+    // watermark before either writes it back, producing duplicate rows.
+    // A lock scoped to MonitoringService alone doesn't cover this: it has
+    // to live here, at the one choke point every caller actually shares.
+    private val collectMutex = Mutex()
+
+    suspend fun collectAllLocked(context: Context): List<Sample> = collectMutex.withLock {
+        collectAll(context)
+    }
 }

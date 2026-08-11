@@ -19,7 +19,12 @@ import java.util.concurrent.TimeUnit
 class SamplingWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
-        val samples = CollectorRegistry.collectAll(applicationContext)
+        // Locked: this runs on an independent WorkManager schedule that can
+        // overlap MonitoringService's own periodic/event-driven cycles,
+        // hitting the exact same collectors and watermarks - see
+        // CollectorRegistry.collectAllLocked() for why this can't be a
+        // lock scoped to just one caller.
+        val samples = CollectorRegistry.collectAllLocked(applicationContext)
         if (samples.isNotEmpty()) {
             val entities = samples.map {
                 SampleEntity(
