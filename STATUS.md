@@ -554,12 +554,68 @@ timestamp — confirmed unrelated to the concurrency bug above (same
 issue in that collector's own event-processing logic. Filed as its own
 issue rather than scope-creeping the batterystats PR.
 
+## 2026-08-11: third T3 collector (`deviceidle`) — and a genuine truncation-detection bug, caught in three rounds
+
+**`DeviceIdleCollector`** (PR #13): raw `dumpsys deviceidle` output —
+Doze state machine detail (`mState`/`mLightState`, idling history,
+allowlists, `mNextAlarmTime`) directly relevant to this project's
+recurring Doze-engagement investigation theme (see 2026-08-08's
+before/after table). Complements the cheap T0 `DozeScreenCollector`
+polling rather than replacing it — this is a periodic deep snapshot
+with structural detail no public API exposes. Real dump is only
+~17,000 chars; capped at 60,000 for headroom after bot review flagged
+an initial 20,000-char cap as too tight (~2.8KB margin).
+
+**Bot review caught a genuine three-round boundary bug** in how
+`DumpsysService` reports whether a dump was truncated:
+1. Round 1: a naive `sb.length >= maxChars` check couldn't distinguish
+   "genuinely capped" from "coincidentally exactly `maxChars` long."
+2. Round 2 "fix": moved the check into `DumpsysService` itself (the
+   only code that sees the pre-truncation length) as `sb.length >
+   maxChars` — but this can *never* be true, because the reader
+   loop's own append guard (`if (sb.length < maxChars) sb.append(...)`)
+   structurally prevents `sb` from ever exceeding the cap. A dump cut
+   off exactly at the boundary read back as "fit fine" — the exact
+   silent-truncation failure this parameter exists to catch.
+3. Round 3 fix (the one that actually holds): a `sawDrop` flag set
+   inside the reader loop's own `else` branch, at the moment content
+   is genuinely skipped — `wasTruncated = sawDrop || sb.length >
+   maxChars`. Also made the `truncated[0]` write unconditional rather
+   than guarded, since the guard's own failure mode (silently
+   swallowing the signal) was worse than a loud crash on a caller
+   violating the contract.
+
+Verified on-device after each round; `userServiceVersion` bumped
+4→5→6 across the three rounds since `DumpsysService`'s behaviour kept
+changing. A clear case of the bot catching a genuinely non-obvious
+off-by-one/boundary bug three times running on the same small piece
+of code, not diminishing-returns nitpicking.
+
+## 2026-08-11: fixed `UsageEventsCollector` duplicate rows (issue #12, PR #14)
+
+Root-caused the triplicate-row bug filed above. Confirmed it's
+**not** the (already-fixed) cross-collector concurrency race: 11
+duplicate groups occurred on-device over 4+ hours *after* that fix
+was already live, each isolated rather than clustered at a single
+wall-clock moment the way a race would produce. Almost all were
+`type_10` (`NOTIFICATION_INTERACTION`, missing from the
+`eventTypeName` map) — consistent with `UsageStatsManager.queryEvents()`
+occasionally handing back the same event twice within a single call,
+plausibly a query window straddling an internal usage-stats file
+rotation and reading the same record from both the old and new file.
+
+Fixed by deduping on `(timestamp, packageName, eventType)` identity
+within each `collect()` call's result, since that's the only place
+the duplication is actually observable — no fix possible upstream in
+the OS API itself. Verified on-device: 293 fresh `usage_events` rows
+post-fix, including 22 `type_10` events (the type that was
+duplicating), zero duplicate groups.
+
 ## Next
 
-- File and pick up the `UsageEventsCollector` triplicate-row bug.
-- More T3 collectors: spec §3 T3 also lists `cpuinfo`, `deviceidle`,
-  and `power` (wakelock holders) as available via the same Shizuku
-  mechanism now that it's proven twice over.
+- More T3 collectors: spec §3 T3 also lists `cpuinfo` and `power`
+  (wakelock holders) as available via the same Shizuku mechanism,
+  now proven three times over.
 - Keep monitoring the post-2026-08-07 improvement (Doze engagement,
   drain rate) — if it holds for several more days that's a good signal
   for the Samsung thread; if it regresses, check whether the games
@@ -567,3 +623,4 @@ issue rather than scope-creeping the batterystats PR.
 - Phase 5 (UI): timeline view aligning app sessions against thermal
   state and battery drain. No new device access needed; could be
   started independently of T3 work.
+- Issue #1: MainActivity doesn't clearly show what's actually running.
