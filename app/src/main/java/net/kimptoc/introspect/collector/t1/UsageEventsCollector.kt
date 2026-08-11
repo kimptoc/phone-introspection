@@ -41,10 +41,22 @@ class UsageEventsCollector : Collector {
             return emptyList()
         }
         val samples = mutableListOf<Sample>()
+        // UsageStatsManager.queryEvents() can hand back the exact same
+        // event twice within a single call - observed on-device as
+        // isolated type_10 (NOTIFICATION_INTERACTION) duplicates spread
+        // across hours, ruling out the (now-fixed) cross-collector race,
+        // which would cluster duplicates at the same wall-clock moment
+        // instead. Most likely cause: a query window straddling an
+        // internal usage-stats file rotation reads the same record from
+        // both the old and new file. Dedup by identity within this call's
+        // result rather than trusting the OS stream to be duplicate-free.
+        val seen = HashSet<Triple<Long, String?, Int>>()
         var maxTimestamp = lastSeen
         val event = UsageEvents.Event()
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
+            if (event.timeStamp > maxTimestamp) maxTimestamp = event.timeStamp
+            if (!seen.add(Triple(event.timeStamp, event.packageName, event.eventType))) continue
             samples += Sample(
                 timestamp = event.timeStamp,
                 collectorId = id,
@@ -52,7 +64,6 @@ class UsageEventsCollector : Collector {
                 valueNum = event.eventType.toDouble(),
                 valueText = eventTypeName(event.eventType),
             )
-            if (event.timeStamp > maxTimestamp) maxTimestamp = event.timeStamp
         }
 
         val nextLastSeen = if (samples.isNotEmpty()) maxTimestamp + 1 else now
