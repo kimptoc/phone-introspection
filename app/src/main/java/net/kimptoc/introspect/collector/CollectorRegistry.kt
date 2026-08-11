@@ -1,6 +1,8 @@
 package net.kimptoc.introspect.collector
 
 import android.content.Context
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import net.kimptoc.introspect.collector.t0.BatteryCollector
 import net.kimptoc.introspect.collector.t0.BootCollector
 import net.kimptoc.introspect.collector.t0.DozeScreenCollector
@@ -13,6 +15,7 @@ import net.kimptoc.introspect.collector.t1.UsageEventsCollector
 import net.kimptoc.introspect.collector.t1.UsageForegroundCollector
 import net.kimptoc.introspect.collector.t2.BatteryAttributionCollector
 import net.kimptoc.introspect.collector.t2.LogcatCollector
+import net.kimptoc.introspect.collector.t3.BatteryStatsCollector
 import net.kimptoc.introspect.collector.t3.SensorServiceCollector
 
 /**
@@ -36,6 +39,7 @@ object CollectorRegistry {
         BatteryAttributionCollector(),
         LogcatCollector(),
         SensorServiceCollector(),
+        BatteryStatsCollector(),
     )
 
     fun availableCollectors(context: Context): List<Collector> =
@@ -47,6 +51,21 @@ object CollectorRegistry {
             all.filter { it.tier == tier }.any { it.isAvailable(context) }
         }
 
-    fun collectAll(context: Context): List<Sample> =
+    // MonitoringService's periodic loop, its event listeners, and
+    // SamplingWorker's independent 15-minute WorkManager tick are all
+    // separate entry points that can run concurrently - each collector's
+    // own watermark gate assumes only one collect() call at a time, so two
+    // concurrent callers can both read the same stale watermark before
+    // either writes it back, producing duplicate rows. private, not just
+    // convention: an unlocked collectAll() sitting right next to the
+    // locked entry point is a bypass waiting for the next caller who
+    // doesn't know to avoid it.
+    private val collectMutex = Mutex()
+
+    private fun collectAll(context: Context): List<Sample> =
         availableCollectors(context).flatMap { it.collect(context) }
+
+    suspend fun collectAllLocked(context: Context): List<Sample> = collectMutex.withLock {
+        collectAll(context)
+    }
 }

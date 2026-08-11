@@ -58,7 +58,7 @@ import java.util.concurrent.TimeUnit
  *
  * `logcat -d` is meant to dump-and-exit, but this collector runs
  * synchronously inside the same sampling cycle as every other collector
- * (`CollectorRegistry.collectAll`), so a wedged process would stall
+ * (`CollectorRegistry.collectAllLocked`), so a wedged process would stall
  * battery/thermal/exit-reason collection behind it — [execTimeoutMs]
  * bounds that, and stdout/stderr are drained on separate threads so a
  * full stderr pipe can't deadlock a blocked stdout read (or vice versa).

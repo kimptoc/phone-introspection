@@ -23,13 +23,22 @@ class DumpsysService : IDumpsysService.Stub() {
         exitProcess(0)
     }
 
-    override fun dumpsys(service: String, timeoutMs: Int, maxChars: Int): String {
+    override fun dumpsys(service: String, args: Array<String>, timeoutMs: Int, maxChars: Int): String {
+        // String[] rather than a space-joined String: no parsing/splitting
+        // ambiguity (a double space would've produced an empty-string arg),
+        // and ProcessBuilder's list form means each element reaches exec()
+        // as a single argument regardless of content - there's no shell
+        // involved to reinterpret it, unlike a string that gets split and
+        // handed to something shell-like.
+        val command = mutableListOf("dumpsys", service)
+        command += args
+
         // Merge stderr into stdout rather than draining it separately: an
         // undrained stderr pipe can fill and block the child mid-write,
         // which would otherwise show up as a spurious "ERROR timeout" with
         // no indication the real cause was our own missing drain (the same
         // class of bug already fixed once in LogcatCollector's exec).
-        val process = ProcessBuilder("dumpsys", service)
+        val process = ProcessBuilder(command)
             .redirectErrorStream(true)
             .start()
         try {

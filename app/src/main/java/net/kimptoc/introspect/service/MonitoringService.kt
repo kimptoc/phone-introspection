@@ -97,7 +97,11 @@ class MonitoringService : Service() {
     }
 
     private suspend fun collectAndPersist() {
-        val samples = CollectorRegistry.collectAll(this)
+        // Locked in CollectorRegistry, not here - SamplingWorker's
+        // independent WorkManager tick is a separate entry point into the
+        // same collectors/watermarks and needs to share the same lock, not
+        // just this service's own callers.
+        val samples = CollectorRegistry.collectAllLocked(this)
         if (samples.isEmpty()) return
         AppDatabase.get(this).sampleDao().insertAll(samples.map { it.toEntity() })
     }
