@@ -51,18 +51,19 @@ object CollectorRegistry {
             all.filter { it.tier == tier }.any { it.isAvailable(context) }
         }
 
-    fun collectAll(context: Context): List<Sample> =
-        availableCollectors(context).flatMap { it.collect(context) }
-
     // MonitoringService's periodic loop, its event listeners, and
     // SamplingWorker's independent 15-minute WorkManager tick are all
-    // separate entry points into collectAll() that can run concurrently -
-    // each collector's own watermark gate assumes only one collect() call
-    // at a time, so two concurrent callers can both read the same stale
-    // watermark before either writes it back, producing duplicate rows.
-    // A lock scoped to MonitoringService alone doesn't cover this: it has
-    // to live here, at the one choke point every caller actually shares.
+    // separate entry points that can run concurrently - each collector's
+    // own watermark gate assumes only one collect() call at a time, so two
+    // concurrent callers can both read the same stale watermark before
+    // either writes it back, producing duplicate rows. private, not just
+    // convention: an unlocked collectAll() sitting right next to the
+    // locked entry point is a bypass waiting for the next caller who
+    // doesn't know to avoid it.
     private val collectMutex = Mutex()
+
+    private fun collectAll(context: Context): List<Sample> =
+        availableCollectors(context).flatMap { it.collect(context) }
 
     suspend fun collectAllLocked(context: Context): List<Sample> = collectMutex.withLock {
         collectAll(context)
