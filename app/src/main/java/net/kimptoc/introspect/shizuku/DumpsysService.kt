@@ -49,6 +49,7 @@ class DumpsysService : IDumpsysService.Stub() {
             // larger service is added. Keep draining past the cap so the
             // process doesn't block on a full pipe; just stop accumulating.
             val sb = StringBuilder(maxChars)
+            var sawDrop = false
             var readerFailed: String? = null
             val readerThread = Thread {
                 try {
@@ -57,7 +58,17 @@ class DumpsysService : IDumpsysService.Stub() {
                     while (true) {
                         val n = reader.read(buf)
                         if (n < 0) break
-                        if (sb.length < maxChars) sb.append(buf, 0, n)
+                        if (sb.length < maxChars) {
+                            sb.append(buf, 0, n)
+                        } else if (n > 0) {
+                            // A chunk landed exactly on the maxChars boundary
+                            // on some earlier iteration, so this loop is now
+                            // skipping real content rather than ever having
+                            // appended past the cap - sb.length alone would
+                            // read back as maxChars, not > maxChars, and look
+                            // indistinguishable from a dump that just fit.
+                            sawDrop = true
+                        }
                     }
                 } catch (e: Exception) {
                     // An uncaught exception here would hit the default
@@ -86,15 +97,23 @@ class DumpsysService : IDumpsysService.Stub() {
             readerFailed?.let { return "ERROR $it" }
             if (process.exitValue() != 0) return "ERROR exit=${process.exitValue()}"
 
-            // This is the only place that ever sees the pre-truncation
-            // length, so it's the only place that can say for certain
-            // whether the cap actually cut anything - a downstream
-            // length-of-the-returned-string check can't distinguish
-            // "capped" from "a genuine dump that happened to land at
-            // exactly maxChars", since both produce the same-length result.
-            val wasTruncated = sb.length > maxChars
-            if (truncated.isNotEmpty()) truncated[0] = wasTruncated
-            return if (wasTruncated) sb.substring(0, maxChars) else sb.toString()
+            // Two independent ways content can be missing from the result,
+            // and only their OR is the real answer: sb.length > maxChars
+            // catches a chunk that overshot the cap (trimmed off by the
+            // substring below), sawDrop catches a chunk that landed exactly
+            // on the boundary and every chunk after it being skipped
+            // outright (sb.length reads back as exactly maxChars there, not
+            // greater - indistinguishable from "genuinely fit" by length
+            // alone). Neither signal alone covers both cases.
+            val wasTruncated = sawDrop || sb.length > maxChars
+            // Contract: the caller always passes a size-1 array (see
+            // ShizukuManager) - writing unconditionally rather than
+            // guarding means a caller that breaks the contract fails loudly
+            // (IndexOutOfBoundsException) instead of the guard's own
+            // failure mode being silently swallowed truncation, the exact
+            // bug this parameter exists to prevent.
+            truncated[0] = wasTruncated
+            return if (sb.length > maxChars) sb.substring(0, maxChars) else sb.toString()
         } catch (e: Exception) {
             return "ERROR ${e.javaClass.simpleName}"
         } finally {

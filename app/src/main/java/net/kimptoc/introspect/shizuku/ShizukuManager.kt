@@ -27,7 +27,7 @@ import rikka.shizuku.Shizuku
  */
 object ShizukuManager {
     private const val PACKAGE_NAME = "net.kimptoc.introspect"
-    private const val userServiceVersion = 5
+    private const val userServiceVersion = 6
 
     @Volatile private var binder: IDumpsysService? = null
     @Volatile private var binding = false
