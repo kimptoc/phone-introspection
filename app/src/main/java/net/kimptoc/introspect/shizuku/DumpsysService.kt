@@ -23,7 +23,7 @@ class DumpsysService : IDumpsysService.Stub() {
         exitProcess(0)
     }
 
-    override fun dumpsys(service: String, args: Array<String>, timeoutMs: Int, maxChars: Int): String {
+    override fun dumpsys(service: String, args: Array<String>, timeoutMs: Int, maxChars: Int, truncated: BooleanArray): String {
         // String[] rather than a space-joined String: no parsing/splitting
         // ambiguity (a double space would've produced an empty-string arg),
         // and ProcessBuilder's list form means each element reaches exec()
@@ -49,6 +49,7 @@ class DumpsysService : IDumpsysService.Stub() {
             // larger service is added. Keep draining past the cap so the
             // process doesn't block on a full pipe; just stop accumulating.
             val sb = StringBuilder(maxChars)
+            var sawDrop = false
             var readerFailed: String? = null
             val readerThread = Thread {
                 try {
@@ -57,7 +58,17 @@ class DumpsysService : IDumpsysService.Stub() {
                     while (true) {
                         val n = reader.read(buf)
                         if (n < 0) break
-                        if (sb.length < maxChars) sb.append(buf, 0, n)
+                        if (sb.length < maxChars) {
+                            sb.append(buf, 0, n)
+                        } else if (n > 0) {
+                            // A chunk landed exactly on the maxChars boundary
+                            // on some earlier iteration, so this loop is now
+                            // skipping real content rather than ever having
+                            // appended past the cap - sb.length alone would
+                            // read back as maxChars, not > maxChars, and look
+                            // indistinguishable from a dump that just fit.
+                            sawDrop = true
+                        }
                     }
                 } catch (e: Exception) {
                     // An uncaught exception here would hit the default
@@ -85,6 +96,23 @@ class DumpsysService : IDumpsysService.Stub() {
             if (!finished) return "ERROR timeout"
             readerFailed?.let { return "ERROR $it" }
             if (process.exitValue() != 0) return "ERROR exit=${process.exitValue()}"
+
+            // Two independent ways content can be missing from the result,
+            // and only their OR is the real answer: sb.length > maxChars
+            // catches a chunk that overshot the cap (trimmed off by the
+            // substring below), sawDrop catches a chunk that landed exactly
+            // on the boundary and every chunk after it being skipped
+            // outright (sb.length reads back as exactly maxChars there, not
+            // greater - indistinguishable from "genuinely fit" by length
+            // alone). Neither signal alone covers both cases.
+            val wasTruncated = sawDrop || sb.length > maxChars
+            // Contract: the caller always passes a size-1 array (see
+            // ShizukuManager) - writing unconditionally rather than
+            // guarding means a caller that breaks the contract fails loudly
+            // (IndexOutOfBoundsException) instead of the guard's own
+            // failure mode being silently swallowed truncation, the exact
+            // bug this parameter exists to prevent.
+            truncated[0] = wasTruncated
             return if (sb.length > maxChars) sb.substring(0, maxChars) else sb.toString()
         } catch (e: Exception) {
             return "ERROR ${e.javaClass.simpleName}"
