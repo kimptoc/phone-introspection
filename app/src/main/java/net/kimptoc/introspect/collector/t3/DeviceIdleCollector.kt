@@ -19,12 +19,18 @@ import net.kimptoc.introspect.shizuku.ShizukuManager
  * public API (`mState`/`mLightState`, `mNextAlarmTime`, the temp
  * allowlist, and the idling-history log of deep/light transitions).
  *
- * Only ~17,000 characters on this device, well under the 20,000 char cap
- * (checked on-device before picking it, same as the other T3 collectors)
- * — small enough that the whole dump fits, including the live state
- * fields at the tail (`mState`, `mScreenOn`, `mCharging`,
- * `mNextAlarmTime`), not just a head-truncated fragment the way
- * `batterystats`' much larger dump needs. Hourly cadence, matching
+ * Only ~17,000 characters on this device (checked on-device before
+ * picking a cap, same as the other T3 collectors), so [maxChars] is set
+ * with real headroom above that, not just past it - the whole point of
+ * this collector is the live state fields at the *tail* of the dump
+ * (`mState`, `mScreenOn`, `mCharging`, `mNextAlarmTime`), and
+ * [DumpsysService]'s cap keeps the *head*. A cap sized close to the
+ * measured length would silently amputate exactly the content this
+ * collector exists to capture the moment the dump grows (more idling-
+ * history entries, more allowlisted apps) past it - "dump" would still
+ * look like a normal success, just missing the one section that
+ * matters. [truncated] makes that condition detectable instead of
+ * silent if it ever happens anyway. Hourly cadence, matching
  * [SensorServiceCollector]: the structural detail here doesn't need
  * finer resolution than that, and the cheap T0 doze collector already
  * covers on/off transitions at full frequency.
@@ -36,7 +42,7 @@ class DeviceIdleCollector : Collector {
     private val prefsName = "deviceidle_collector"
     private val lastRunKey = "last_run_timestamp"
     private val intervalMs = 60 * 60 * 1000L
-    private val maxChars = 20_000
+    private val maxChars = 60_000
 
     override fun isAvailable(context: Context): Boolean = ShizukuManager.isPermissionGranted()
 
@@ -58,9 +64,20 @@ class DeviceIdleCollector : Collector {
         prefs.edit().putLong(lastRunKey, now).apply()
 
         return when (result) {
-            is DumpsysResult.Success -> listOf(
-                Sample(now, id, "dump", valueNum = result.text.length.toDouble(), valueText = result.text),
-            )
+            is DumpsysResult.Success -> {
+                val samples = mutableListOf(
+                    Sample(now, id, "dump", valueNum = result.text.length.toDouble(), valueText = result.text),
+                )
+                // DumpsysService returns exactly maxChars when the cap was
+                // hit (it substrings to that length), or fewer if the dump
+                // was genuinely smaller - so equality is a reliable signal
+                // the tail state fields this collector exists for were cut
+                // off, not just "a big dump happened to land on this size."
+                if (result.text.length >= maxChars) {
+                    samples += Sample(now, id, "dump_status", valueNum = 1.0, valueText = "truncated")
+                }
+                samples
+            }
             is DumpsysResult.NotPermitted -> listOf(
                 Sample(now, id, "dump_status", valueNum = 0.0, valueText = "not_permitted"),
             )
