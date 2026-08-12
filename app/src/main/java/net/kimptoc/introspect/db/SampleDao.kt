@@ -14,4 +14,7 @@ interface SampleDao {
 
     @Query("SELECT COUNT(*) FROM samples")
     suspend fun count(): Long
+
+    @Query("SELECT MAX(timestamp) FROM samples")
+    suspend fun lastTimestamp(): Long?
 }

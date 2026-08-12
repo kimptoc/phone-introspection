@@ -15,10 +15,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.kimptoc.introspect.collector.CollectorRegistry
+import net.kimptoc.introspect.collector.Tier
 import net.kimptoc.introspect.collector.t1.UsageAccess
+import net.kimptoc.introspect.db.AppDatabase
 import net.kimptoc.introspect.export.CsvExporter
 import net.kimptoc.introspect.service.MonitoringService
 import net.kimptoc.introspect.service.SamplingWorker
@@ -26,8 +31,6 @@ import net.kimptoc.introspect.shizuku.ShizukuManager
 import rikka.shizuku.Shizuku
 
 class MainActivity : ComponentActivity() {
-
-    private var serviceRunning = false
 
     private val shizukuPermissionListener =
         Shizuku.OnRequestPermissionResultListener { _, _ -> refreshTierStatus() }
@@ -50,21 +53,30 @@ class MainActivity : ComponentActivity() {
         val exportButton = findViewById<Button>(R.id.exportButton)
         val usageAccessButton = findViewById<Button>(R.id.usageAccessButton)
         val shizukuAccessButton = findViewById<Button>(R.id.shizukuAccessButton)
-        val statusText = findViewById<TextView>(R.id.serviceStatusText)
 
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
         toggleButton.setOnClickListener {
-            if (serviceRunning) {
+            // Reads MonitoringService.isRunning fresh on every click rather
+            // than trusting a flag this activity flipped itself (issue #1):
+            // that's what makes this correct even when the service was
+            // started/stopped by something other than this button, e.g.
+            // the ~14-minute post-reboot START_STICKY restart documented in
+            // STATUS.md.
+            if (MonitoringService.isRunning) {
                 MonitoringService.stop(this)
+                // A user tapping "Stop" expects monitoring to actually
+                // stop, not silently keep sampling every 15 minutes via the
+                // WorkManager fallback - that fallback exists for Samsung
+                // killing the service *without* user action, a different
+                // case from an explicit Stop.
+                SamplingWorker.cancel(this)
             } else {
                 requestNotificationPermissionIfNeeded()
                 MonitoringService.start(this)
                 SamplingWorker.enqueuePeriodic(this)
             }
-            serviceRunning = !serviceRunning
-            toggleButton.setText(if (serviceRunning) R.string.stop_service else R.string.start_service)
-            statusText.text = if (serviceRunning) getString(R.string.notification_title) else "Stopped"
+            refreshServiceStatus()
         }
 
         exemptionButton.setOnClickListener { requestBatteryOptimizationExemption() }
@@ -77,12 +89,21 @@ class MainActivity : ComponentActivity() {
 
         shizukuAccessButton.setOnClickListener { requestShizukuAccessIfNeeded() }
 
-        refreshTierStatus()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshTierStatus()
+        // repeatOnLifecycle rather than a one-shot refresh in onResume:
+        // "is this actually collecting right now" (issue #1) needs the
+        // last-sample time and tier status to stay current while the
+        // screen is open, not just reflect whatever was true at the moment
+        // it was opened. Automatically starts/stops with RESUMED, so this
+        // doesn't poll the DB while backgrounded.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    refreshServiceStatus()
+                    refreshTierStatus()
+                    delay(STATUS_REFRESH_INTERVAL_MS)
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -90,11 +111,41 @@ class MainActivity : ComponentActivity() {
         Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
     }
 
+    private fun refreshServiceStatus() {
+        val toggleButton = findViewById<Button>(R.id.toggleServiceButton)
+        val statusText = findViewById<TextView>(R.id.serviceStatusText)
+        val running = MonitoringService.isRunning
+        toggleButton.setText(if (running) R.string.stop_service else R.string.start_service)
+
+        lifecycleScope.launch {
+            val dao = AppDatabase.get(this@MainActivity).sampleDao()
+            val lastTimestamp = dao.lastTimestamp()
+            val count = dao.count()
+            val lastSampleText = if (lastTimestamp == null) {
+                "no samples yet"
+            } else {
+                val ageSec = (System.currentTimeMillis() - lastTimestamp) / 1000
+                "last sample ${ageSec}s ago"
+            }
+            statusText.text = buildString {
+                append(if (running) getString(R.string.notification_title) else "Stopped")
+                if (running) {
+                    // The fallback keeps sampling on its own schedule even
+                    // if this activity's own service connection is gone
+                    // (issue #1's point 2) - worth saying so, not just
+                    // "running".
+                    append(" (15-min fallback also active)")
+                }
+                append("\n$lastSampleText, $count total")
+            }
+        }
+    }
+
     private fun refreshTierStatus() {
         val tierStatusText = findViewById<TextView>(R.id.tierStatusText)
         val status = CollectorRegistry.tierStatus(this)
         tierStatusText.text = status.entries.joinToString("\n") { (tier, live) ->
-            "$tier: ${if (live) "live" else "dark"}"
+            "$tier (${TIER_LABELS[tier]}): ${if (live) "live" else "dark"}"
         }
     }
 
@@ -155,5 +206,19 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val SHIZUKU_REQUEST_CODE = 1001
+        const val STATUS_REFRESH_INTERVAL_MS = 5000L
+
+        // Short, one-line-per-tier context for the bare T0-T4 codes
+        // (issue #1, point 3) - what each tier needs to go live, not why a
+        // specific one is currently dark (that varies: no permission
+        // granted vs. genuinely unavailable vs. Shizuku not running, and
+        // isn't something tierStatus() distinguishes today).
+        val TIER_LABELS = mapOf(
+            Tier.T0 to "no permissions",
+            Tier.T1 to "usage access",
+            Tier.T2 to "adb-provisioned",
+            Tier.T3 to "Shizuku",
+            Tier.T4 to "root, unsupported",
+        )
     }
 }
