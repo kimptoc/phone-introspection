@@ -1,12 +1,5 @@
 package net.kimptoc.introspect.collector.t3
 
-import android.content.Context
-import net.kimptoc.introspect.collector.Collector
-import net.kimptoc.introspect.collector.Sample
-import net.kimptoc.introspect.collector.Tier
-import net.kimptoc.introspect.shizuku.DumpsysResult
-import net.kimptoc.introspect.shizuku.ShizukuManager
-
 /**
  * Raw `dumpsys batterystats --charged` output (spec §3 T3) — historical
  * per-UID wakelocks, CPU time and kernel wake lock attribution, none of
@@ -31,46 +24,11 @@ import net.kimptoc.introspect.shizuku.ShizukuManager
  * cadence to keep storage growth in check (spec §7 names this signal by
  * name as the real space consumer among dumpsys sources).
  */
-class BatteryStatsCollector : Collector {
+class BatteryStatsCollector : DumpsysCollector() {
     override val id = "batterystats"
-    override val tier = Tier.T3
-
-    private val prefsName = "batterystats_collector"
-    private val lastRunKey = "last_run_timestamp"
-    private val intervalMs = 2 * 60 * 60 * 1000L
-    private val maxChars = 150_000
-    private val timeoutMs = 10_000
-
-    override fun isAvailable(context: Context): Boolean = ShizukuManager.isPermissionGranted()
-
-    override fun collect(context: Context): List<Sample> {
-        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
-        val now = System.currentTimeMillis()
-        val lastRun = prefs.getLong(lastRunKey, 0L)
-        if (now - lastRun in 0 until intervalMs) return emptyList()
-
-        val result = ShizukuManager.dumpsys("batterystats", args = arrayOf("--charged"), timeoutMs = timeoutMs, maxChars = maxChars)
-
-        // NotBoundYet is a one-time startup condition, not a completed
-        // attempt (same reasoning as SensorServiceCollector) - don't spend
-        // the 2-hour gate waiting on a bind that normally finishes in
-        // seconds.
-        if (result is DumpsysResult.NotBoundYet) {
-            return listOf(Sample(now, id, "dump_status", valueNum = 0.0, valueText = "not_bound_yet"))
-        }
-        prefs.edit().putLong(lastRunKey, now).apply()
-
-        return when (result) {
-            is DumpsysResult.Success -> listOf(
-                Sample(now, id, "dump", valueNum = result.text.length.toDouble(), valueText = result.text),
-            )
-            is DumpsysResult.NotPermitted -> listOf(
-                Sample(now, id, "dump_status", valueNum = 0.0, valueText = "not_permitted"),
-            )
-            is DumpsysResult.Error -> listOf(
-                Sample(now, id, "dump_status", valueNum = 0.0, valueText = result.detail),
-            )
-            is DumpsysResult.NotBoundYet -> emptyList() // unreachable, handled above
-        }
-    }
+    override val service = "batterystats"
+    override val args = arrayOf("--charged")
+    override val intervalMs = 2 * 60 * 60 * 1000L
+    override val maxChars = 150_000
+    override val timeoutMs = 10_000
 }

@@ -1,12 +1,5 @@
 package net.kimptoc.introspect.collector.t3
 
-import android.content.Context
-import net.kimptoc.introspect.collector.Collector
-import net.kimptoc.introspect.collector.Sample
-import net.kimptoc.introspect.collector.Tier
-import net.kimptoc.introspect.shizuku.DumpsysResult
-import net.kimptoc.introspect.shizuku.ShizukuManager
-
 /**
  * Raw `dumpsys cpuinfo` output (spec §3 T3) — system-wide CPU load by
  * process, load averages, and a `TOTAL` breakdown by user/kernel/iowait/
@@ -31,55 +24,9 @@ import net.kimptoc.introspect.shizuku.ShizukuManager
  * correlating with process/memory investigations, the same role
  * `sensorservice` and `deviceidle` play for their respective domains.
  */
-class CpuInfoCollector : Collector {
+class CpuInfoCollector : DumpsysCollector() {
     override val id = "cpuinfo"
-    override val tier = Tier.T3
-
-    private val prefsName = "cpuinfo_collector"
-    private val lastRunKey = "last_run_timestamp"
-    private val intervalMs = 60 * 60 * 1000L
-    private val maxChars = 50_000
-
-    override fun isAvailable(context: Context): Boolean = ShizukuManager.isPermissionGranted()
-
-    override fun collect(context: Context): List<Sample> {
-        val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
-        val now = System.currentTimeMillis()
-        val lastRun = prefs.getLong(lastRunKey, 0L)
-        if (now - lastRun in 0 until intervalMs) return emptyList()
-
-        val result = ShizukuManager.dumpsys("cpuinfo", maxChars = maxChars)
-
-        // NotBoundYet is a one-time startup condition, not a completed
-        // attempt (same reasoning as the other T3 collectors) - don't
-        // spend the hourly gate waiting on a bind that normally finishes
-        // in seconds.
-        if (result is DumpsysResult.NotBoundYet) {
-            return listOf(Sample(now, id, "dump_status", valueNum = 0.0, valueText = "not_bound_yet"))
-        }
-        prefs.edit().putLong(lastRunKey, now).apply()
-
-        return when (result) {
-            is DumpsysResult.Success -> {
-                val samples = mutableListOf(
-                    Sample(now, id, "dump", valueNum = result.text.length.toDouble(), valueText = result.text),
-                )
-                // result.truncated is computed by DumpsysService against the
-                // real pre-truncation length (see DeviceIdleCollector's
-                // three-round history on why this can't be re-derived from
-                // the returned string's own length downstream).
-                if (result.truncated) {
-                    samples += Sample(now, id, "dump_status", valueNum = 1.0, valueText = "truncated")
-                }
-                samples
-            }
-            is DumpsysResult.NotPermitted -> listOf(
-                Sample(now, id, "dump_status", valueNum = 0.0, valueText = "not_permitted"),
-            )
-            is DumpsysResult.Error -> listOf(
-                Sample(now, id, "dump_status", valueNum = 0.0, valueText = result.detail),
-            )
-            is DumpsysResult.NotBoundYet -> emptyList() // unreachable, handled above
-        }
-    }
+    override val service = "cpuinfo"
+    override val intervalMs = 60 * 60 * 1000L
+    override val maxChars = 50_000
 }
