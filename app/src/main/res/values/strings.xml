@@ -13,4 +13,9 @@
     <string name="battery_threshold_channel_name">Battery threshold alerts</string>
     <string name="battery_threshold_title">Battery threshold reached</string>
     <string name="battery_threshold_text">Battery dropped to %d%%</string>
+    <string name="stopped">Stopped</string>
+    <string name="no_samples_yet">no samples yet</string>
+    <string name="last_sample_ago">last sample %ds ago</string>
+    <string name="fallback_also_active">(15-min fallback also active)</string>
+    <string name="total_samples">%d total</string>
 </resources>

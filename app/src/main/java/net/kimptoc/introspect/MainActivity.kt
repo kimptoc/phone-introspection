@@ -57,13 +57,25 @@ class MainActivity : ComponentActivity() {
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
         toggleButton.setOnClickListener {
-            // Reads MonitoringService.isRunning fresh on every click rather
-            // than trusting a flag this activity flipped itself (issue #1):
-            // that's what makes this correct even when the service was
-            // started/stopped by something other than this button, e.g.
-            // the ~14-minute post-reboot START_STICKY restart documented in
-            // STATUS.md.
-            if (MonitoringService.isRunning) {
+            // The intent, decided *before* start()/stop() are called, not
+            // read back from MonitoringService.isRunning afterwards -
+            // onCreate()/onDestroy() haven't necessarily run yet the
+            // instant startForegroundService()/stopService() return, so
+            // reading isRunning right here could still show the pre-tap
+            // value and put the UI right back to lying about state, just
+            // on this tap instead of a stale local boolean (bot review on
+            // PR #19). MonitoringService.isRunning is still the source of
+            // truth generally (e.g. after the service is started/stopped
+            // by something other than this button, like the ~14-minute
+            // post-reboot START_STICKY restart in STATUS.md) - the 5s
+            // poll loop reconciles with it shortly after.
+            val targetRunning = !MonitoringService.isRunning
+            toggleButton.setText(if (targetRunning) R.string.stop_service else R.string.start_service)
+            if (targetRunning) {
+                requestNotificationPermissionIfNeeded()
+                MonitoringService.start(this)
+                SamplingWorker.enqueuePeriodic(this)
+            } else {
                 MonitoringService.stop(this)
                 // A user tapping "Stop" expects monitoring to actually
                 // stop, not silently keep sampling every 15 minutes via the
@@ -71,12 +83,8 @@ class MainActivity : ComponentActivity() {
                 // killing the service *without* user action, a different
                 // case from an explicit Stop.
                 SamplingWorker.cancel(this)
-            } else {
-                requestNotificationPermissionIfNeeded()
-                MonitoringService.start(this)
-                SamplingWorker.enqueuePeriodic(this)
             }
-            refreshServiceStatus()
+            lifecycleScope.launch { refreshServiceStatus() }
         }
 
         exemptionButton.setOnClickListener { requestBatteryOptimizationExemption() }
@@ -111,33 +119,38 @@ class MainActivity : ComponentActivity() {
         Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
     }
 
-    private fun refreshServiceStatus() {
+    // suspend, not a fresh lifecycleScope.launch{} per call: the poll loop
+    // already runs inside one coroutine and previously spawned a brand new
+    // unawaited one on every 5s tick (and every tap) that outlived
+    // repeatOnLifecycle's own cancellation - a real leak risk if a DB read
+    // ever outlasted the tick interval (bot review on PR #19). Now there's
+    // one coroutine per call site, awaited, cancellable with the rest of
+    // the loop.
+    private suspend fun refreshServiceStatus() {
         val toggleButton = findViewById<Button>(R.id.toggleServiceButton)
         val statusText = findViewById<TextView>(R.id.serviceStatusText)
         val running = MonitoringService.isRunning
         toggleButton.setText(if (running) R.string.stop_service else R.string.start_service)
 
-        lifecycleScope.launch {
-            val dao = AppDatabase.get(this@MainActivity).sampleDao()
-            val lastTimestamp = dao.lastTimestamp()
-            val count = dao.count()
-            val lastSampleText = if (lastTimestamp == null) {
-                "no samples yet"
-            } else {
-                val ageSec = (System.currentTimeMillis() - lastTimestamp) / 1000
-                "last sample ${ageSec}s ago"
+        val dao = AppDatabase.get(this@MainActivity).sampleDao()
+        val lastTimestamp = dao.lastTimestamp()
+        val count = dao.count()
+        val lastSampleText = if (lastTimestamp == null) {
+            getString(R.string.no_samples_yet)
+        } else {
+            val ageSec = (System.currentTimeMillis() - lastTimestamp) / 1000
+            getString(R.string.last_sample_ago, ageSec)
+        }
+        statusText.text = buildString {
+            append(if (running) getString(R.string.notification_title) else getString(R.string.stopped))
+            if (running) {
+                // The fallback keeps sampling on its own schedule even
+                // if this activity's own service connection is gone
+                // (issue #1's point 2) - worth saying so, not just
+                // "running".
+                append(" ").append(getString(R.string.fallback_also_active))
             }
-            statusText.text = buildString {
-                append(if (running) getString(R.string.notification_title) else "Stopped")
-                if (running) {
-                    // The fallback keeps sampling on its own schedule even
-                    // if this activity's own service connection is gone
-                    // (issue #1's point 2) - worth saying so, not just
-                    // "running".
-                    append(" (15-min fallback also active)")
-                }
-                append("\n$lastSampleText, $count total")
-            }
+            append("\n").append(lastSampleText).append(", ").append(getString(R.string.total_samples, count))
         }
     }
 
