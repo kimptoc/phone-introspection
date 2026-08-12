@@ -611,11 +611,71 @@ the OS API itself. Verified on-device: 293 fresh `usage_events` rows
 post-fix, including 22 `type_10` events (the type that was
 duplicating), zero duplicate groups.
 
+## 2026-08-12: T3 complete — `cpuinfo`, a `DumpsysCollector` base class, and `power` close out spec §3's dumpsys list
+
+**`CpuInfoCollector`** (PR #15): raw `dumpsys cpuinfo` output — system-
+wide CPU load by process plus a `TOTAL` user/kernel/iowait/irq/softirq
+breakdown. A point-in-time load snapshot, complementing
+`BatteryStatsCollector`'s cumulative since-charge CPU time — directly
+useful for the memory/process-bloat investigation thread (the
+2026-08-07 1,026-process finding had no CPU-load data alongside it at
+the time). Consistent ~17,000-char dump, capped at 50,000, hourly
+cadence.
+
+**Extracted a `DumpsysCollector` base class** (issue #16, PR #17)
+after a bot nitpick on PR #15 pointed out that four collectors had
+independently copied the same ~45-line state machine (watermark gate,
+`NotBoundYet` handling, `Success`/`NotPermitted`/`Error` mapping) and
+had already drifted apart in practice: `SensorServiceCollector`
+predated the `truncated` handling the other three shipped with, with
+no mechanism to pick it up. Bringing it up to date surfaced real
+value — `sensorservice` (20,000-char cap vs. a real 268,855-char
+dump) and `batterystats` (150,000 vs. ~550,000) now correctly report
+`dump_status=truncated` every cycle, previously silent. This was also
+the **first on-device confirmation that the `sawDrop` fix (PR #13)
+actually detects real truncation**: `DeviceIdleCollector`'s dump never
+exceeds its own cap, so all its prior verification only ever proved
+the absence of false positives, never a true positive.
+
+One capture during that verification briefly looked like a
+regression — traced via `dumpsys package`'s `lastUpdateTime` to the
+old pre-refactor build (installed *before* that particular capture),
+not a defect in the new code. 3/3 reproductions post-install,
+including deliberately forcing all four collectors to fire together
+right after a fresh Shizuku bind (the exact scenario that produced
+the anomaly), correctly detected truncation with no false positives
+on the two collectors that don't need it.
+
+**`PowerCollector`** (PR #18): raw `dumpsys power` output — the last
+named T3 signal in spec §3's dumpsys table. Currently-held wake locks
+by owner/uid/duration and suspend blocker state — the classic
+runaway-wakelock drain signature `BatteryStatsCollector`'s cumulative
+view can only name a culprit for after the fact. Real dump is
+~449,776 chars, but the `Wake Locks`/`Suspend Blockers` sections that
+matter are fully contained in the first ~13,100 — capped at 30,000
+for >2x headroom, same head-heavy pattern as `sensorservice`/
+`batterystats`. Trivial to add thanks to the new base class — five
+lines plus KDoc. Verified on-device: real wake lock data captured
+(including a 2-day-11-hour `StepCounterWakeLock`, a candidate worth a
+closer look), `truncated` correctly reported.
+
+**Real environmental issue hit during `power`'s verification,
+unrelated to the code**: three `shizuku_server` processes were
+running simultaneously, which appears to be why binding got stuck on
+repeated `NotBoundYet` across 5+ cycles. Resolved by force-stopping
+and restarting Shizuku cleanly from its own app — binding then
+succeeded on the very next cycle. Another entry in the "Shizuku is a
+live dependency that can misbehave independently of this app"
+column, alongside the earlier server-death incidents.
+
+Spec §3's entire named T3 dumpsys list (`batterystats`,
+`sensorservice`, `deviceidle`, `cpuinfo`, `power`) is now shipped.
+
 ## Next
 
-- More T3 collectors: spec §3 T3 also lists `cpuinfo` and `power`
-  (wakelock holders) as available via the same Shizuku mechanism,
-  now proven three times over.
+- `myhourly:StepCounterWakeLock` held for 2 days 11 hours, spotted in
+  `PowerCollector`'s first real capture — a wake lock held that long
+  is itself worth investigating, independent of any collector work.
 - Keep monitoring the post-2026-08-07 improvement (Doze engagement,
   drain rate) — if it holds for several more days that's a good signal
   for the Samsung thread; if it regresses, check whether the games
