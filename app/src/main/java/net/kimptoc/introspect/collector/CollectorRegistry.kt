@@ -18,6 +18,7 @@ import net.kimptoc.introspect.collector.t2.LogcatCollector
 import net.kimptoc.introspect.collector.t3.BatteryStatsCollector
 import net.kimptoc.introspect.collector.t3.CpuInfoCollector
 import net.kimptoc.introspect.collector.t3.DeviceIdleCollector
+import net.kimptoc.introspect.collector.t3.PowerCollector
 import net.kimptoc.introspect.collector.t3.SensorServiceCollector
 
 /**
@@ -44,6 +45,7 @@ object CollectorRegistry {
         BatteryStatsCollector(),
         DeviceIdleCollector(),
         CpuInfoCollector(),
+        PowerCollector(),
     )
 
     fun availableCollectors(context: Context): List<Collector> =
