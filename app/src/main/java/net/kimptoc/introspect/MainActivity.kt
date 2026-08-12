@@ -84,7 +84,17 @@ class MainActivity : ComponentActivity() {
                 // case from an explicit Stop.
                 SamplingWorker.cancel(this)
             }
-            lifecycleScope.launch { refreshServiceStatus() }
+            // Passing targetRunning explicitly, not letting this re-derive
+            // MonitoringService.isRunning itself: lifecycleScope runs on
+            // Dispatchers.Main.immediate, so this launch executes inline
+            // in the same call stack as the click handler, before
+            // onCreate()/onDestroy() have been dispatched - re-deriving
+            // here would immediately overwrite the fresh label above with
+            // the same stale value it was trying to fix (bot review on
+            // PR #19, round 2). The unforced call from the poll loop below
+            // is what re-derives real state and self-corrects if start()/
+            // stop() didn't actually succeed.
+            lifecycleScope.launch { refreshServiceStatus(forceRunning = targetRunning) }
         }
 
         exemptionButton.setOnClickListener { requestBatteryOptimizationExemption() }
@@ -126,10 +136,18 @@ class MainActivity : ComponentActivity() {
     // ever outlasted the tick interval (bot review on PR #19). Now there's
     // one coroutine per call site, awaited, cancellable with the rest of
     // the loop.
-    private suspend fun refreshServiceStatus() {
+    //
+    // forceRunning lets the click handler's own launch (which runs inline,
+    // same call stack, via Main.immediate) show the just-decided target
+    // state instead of re-deriving MonitoringService.isRunning - which
+    // hasn't updated yet at that point and would immediately overwrite the
+    // fresh label with the stale one (bot review round 2). The poll loop
+    // below always calls this with forceRunning=null, so it's still the
+    // one place real state gets re-derived and self-corrects.
+    private suspend fun refreshServiceStatus(forceRunning: Boolean? = null) {
         val toggleButton = findViewById<Button>(R.id.toggleServiceButton)
         val statusText = findViewById<TextView>(R.id.serviceStatusText)
-        val running = MonitoringService.isRunning
+        val running = forceRunning ?: MonitoringService.isRunning
         toggleButton.setText(if (running) R.string.stop_service else R.string.start_service)
 
         val dao = AppDatabase.get(this@MainActivity).sampleDao()
