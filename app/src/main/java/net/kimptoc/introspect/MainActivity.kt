@@ -15,10 +15,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.kimptoc.introspect.collector.CollectorRegistry
+import net.kimptoc.introspect.collector.Tier
 import net.kimptoc.introspect.collector.t1.UsageAccess
+import net.kimptoc.introspect.db.AppDatabase
 import net.kimptoc.introspect.export.CsvExporter
 import net.kimptoc.introspect.service.MonitoringService
 import net.kimptoc.introspect.service.SamplingWorker
@@ -26,8 +31,6 @@ import net.kimptoc.introspect.shizuku.ShizukuManager
 import rikka.shizuku.Shizuku
 
 class MainActivity : ComponentActivity() {
-
-    private var serviceRunning = false
 
     private val shizukuPermissionListener =
         Shizuku.OnRequestPermissionResultListener { _, _ -> refreshTierStatus() }
@@ -50,21 +53,48 @@ class MainActivity : ComponentActivity() {
         val exportButton = findViewById<Button>(R.id.exportButton)
         val usageAccessButton = findViewById<Button>(R.id.usageAccessButton)
         val shizukuAccessButton = findViewById<Button>(R.id.shizukuAccessButton)
-        val statusText = findViewById<TextView>(R.id.serviceStatusText)
 
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
         toggleButton.setOnClickListener {
-            if (serviceRunning) {
-                MonitoringService.stop(this)
-            } else {
+            // The intent, decided *before* start()/stop() are called, not
+            // read back from MonitoringService.isRunning afterwards -
+            // onCreate()/onDestroy() haven't necessarily run yet the
+            // instant startForegroundService()/stopService() return, so
+            // reading isRunning right here could still show the pre-tap
+            // value and put the UI right back to lying about state, just
+            // on this tap instead of a stale local boolean (bot review on
+            // PR #19). MonitoringService.isRunning is still the source of
+            // truth generally (e.g. after the service is started/stopped
+            // by something other than this button, like the ~14-minute
+            // post-reboot START_STICKY restart in STATUS.md) - the 5s
+            // poll loop reconciles with it shortly after.
+            val targetRunning = !MonitoringService.isRunning
+            toggleButton.setText(if (targetRunning) R.string.stop_service else R.string.start_service)
+            if (targetRunning) {
                 requestNotificationPermissionIfNeeded()
                 MonitoringService.start(this)
                 SamplingWorker.enqueuePeriodic(this)
+            } else {
+                MonitoringService.stop(this)
+                // A user tapping "Stop" expects monitoring to actually
+                // stop, not silently keep sampling every 15 minutes via the
+                // WorkManager fallback - that fallback exists for Samsung
+                // killing the service *without* user action, a different
+                // case from an explicit Stop.
+                SamplingWorker.cancel(this)
             }
-            serviceRunning = !serviceRunning
-            toggleButton.setText(if (serviceRunning) R.string.stop_service else R.string.start_service)
-            statusText.text = if (serviceRunning) getString(R.string.notification_title) else "Stopped"
+            // Passing targetRunning explicitly, not letting this re-derive
+            // MonitoringService.isRunning itself: lifecycleScope runs on
+            // Dispatchers.Main.immediate, so this launch executes inline
+            // in the same call stack as the click handler, before
+            // onCreate()/onDestroy() have been dispatched - re-deriving
+            // here would immediately overwrite the fresh label above with
+            // the same stale value it was trying to fix (bot review on
+            // PR #19, round 2). The unforced call from the poll loop below
+            // is what re-derives real state and self-corrects if start()/
+            // stop() didn't actually succeed.
+            lifecycleScope.launch { refreshServiceStatus(forceRunning = targetRunning) }
         }
 
         exemptionButton.setOnClickListener { requestBatteryOptimizationExemption() }
@@ -77,12 +107,21 @@ class MainActivity : ComponentActivity() {
 
         shizukuAccessButton.setOnClickListener { requestShizukuAccessIfNeeded() }
 
-        refreshTierStatus()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        refreshTierStatus()
+        // repeatOnLifecycle rather than a one-shot refresh in onResume:
+        // "is this actually collecting right now" (issue #1) needs the
+        // last-sample time and tier status to stay current while the
+        // screen is open, not just reflect whatever was true at the moment
+        // it was opened. Automatically starts/stops with RESUMED, so this
+        // doesn't poll the DB while backgrounded.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    refreshServiceStatus()
+                    refreshTierStatus()
+                    delay(STATUS_REFRESH_INTERVAL_MS)
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -90,11 +129,54 @@ class MainActivity : ComponentActivity() {
         Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
     }
 
+    // suspend, not a fresh lifecycleScope.launch{} per call: the poll loop
+    // already runs inside one coroutine and previously spawned a brand new
+    // unawaited one on every 5s tick (and every tap) that outlived
+    // repeatOnLifecycle's own cancellation - a real leak risk if a DB read
+    // ever outlasted the tick interval (bot review on PR #19). Now there's
+    // one coroutine per call site, awaited, cancellable with the rest of
+    // the loop.
+    //
+    // forceRunning lets the click handler's own launch (which runs inline,
+    // same call stack, via Main.immediate) show the just-decided target
+    // state instead of re-deriving MonitoringService.isRunning - which
+    // hasn't updated yet at that point and would immediately overwrite the
+    // fresh label with the stale one (bot review round 2). The poll loop
+    // below always calls this with forceRunning=null, so it's still the
+    // one place real state gets re-derived and self-corrects.
+    private suspend fun refreshServiceStatus(forceRunning: Boolean? = null) {
+        val toggleButton = findViewById<Button>(R.id.toggleServiceButton)
+        val statusText = findViewById<TextView>(R.id.serviceStatusText)
+        val running = forceRunning ?: MonitoringService.isRunning
+        toggleButton.setText(if (running) R.string.stop_service else R.string.start_service)
+
+        val dao = AppDatabase.get(this@MainActivity).sampleDao()
+        val lastTimestamp = dao.lastTimestamp()
+        val count = dao.count()
+        val lastSampleText = if (lastTimestamp == null) {
+            getString(R.string.no_samples_yet)
+        } else {
+            val ageSec = (System.currentTimeMillis() - lastTimestamp) / 1000
+            getString(R.string.last_sample_ago, ageSec)
+        }
+        statusText.text = buildString {
+            append(if (running) getString(R.string.notification_title) else getString(R.string.stopped))
+            if (running) {
+                // The fallback keeps sampling on its own schedule even
+                // if this activity's own service connection is gone
+                // (issue #1's point 2) - worth saying so, not just
+                // "running".
+                append(" ").append(getString(R.string.fallback_also_active))
+            }
+            append("\n").append(lastSampleText).append(", ").append(getString(R.string.total_samples, count))
+        }
+    }
+
     private fun refreshTierStatus() {
         val tierStatusText = findViewById<TextView>(R.id.tierStatusText)
         val status = CollectorRegistry.tierStatus(this)
         tierStatusText.text = status.entries.joinToString("\n") { (tier, live) ->
-            "$tier: ${if (live) "live" else "dark"}"
+            "$tier (${TIER_LABELS[tier]}): ${if (live) "live" else "dark"}"
         }
     }
 
@@ -155,5 +237,19 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val SHIZUKU_REQUEST_CODE = 1001
+        const val STATUS_REFRESH_INTERVAL_MS = 5000L
+
+        // Short, one-line-per-tier context for the bare T0-T4 codes
+        // (issue #1, point 3) - what each tier needs to go live, not why a
+        // specific one is currently dark (that varies: no permission
+        // granted vs. genuinely unavailable vs. Shizuku not running, and
+        // isn't something tierStatus() distinguishes today).
+        val TIER_LABELS = mapOf(
+            Tier.T0 to "no permissions",
+            Tier.T1 to "usage access",
+            Tier.T2 to "adb-provisioned",
+            Tier.T3 to "Shizuku",
+            Tier.T4 to "root, unsupported",
+        )
     }
 }

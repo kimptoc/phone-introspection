@@ -46,6 +46,7 @@ class MonitoringService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        isRunning = true
         startForeground(NOTIFICATION_ID, buildNotification())
         registerEventListeners()
         startSamplingLoop()
@@ -61,6 +62,7 @@ class MonitoringService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        isRunning = false
         unregisterReceiver(eventReceiver)
         thermalListener?.let {
             (getSystemService(Context.POWER_SERVICE) as PowerManager).removeThermalStatusListener(it)
@@ -137,14 +139,45 @@ class MonitoringService : Service() {
         private const val CHANNEL_ID = "monitoring"
         private const val NOTIFICATION_ID = 1
         private const val SAMPLE_INTERVAL_MS = 60_000L
+        private const val PREFS_NAME = "monitoring_state"
+        private const val KEY_USER_ENABLED = "user_enabled"
+
+        // In-process flag, not a query against ActivityManager: reflects
+        // reality even after a START_STICKY restart the activity never
+        // triggered itself (e.g. the ~14-minute post-reboot restart
+        // documented in STATUS.md), which a local boolean in MainActivity
+        // couldn't (issue #1) - onCreate/onDestroy always run regardless of
+        // who or what caused them.
+        @Volatile
+        var isRunning = false
+            private set
 
         fun start(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_USER_ENABLED, true).apply()
             context.startForegroundService(Intent(context, MonitoringService::class.java))
         }
 
         fun stop(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_USER_ENABLED, false).apply()
             context.stopService(Intent(context, MonitoringService::class.java))
         }
+
+        /**
+         * Whether the user's last explicit Start/Stop tap (or the default
+         * for a never-toggled fresh install) means monitoring should be
+         * running. [BootReceiver] checks this before restarting anything -
+         * without it, an explicit Stop silently un-stops itself on the
+         * next reboot, the same "UI says one thing, reality does another"
+         * failure issue #1 is about, just triggered by a reboot instead of
+         * a stale local boolean. Defaults to true so a fresh install (or
+         * anyone who's never tapped Stop) keeps the pre-existing
+         * boot-restart resilience documented in STATUS.md.
+         */
+        fun isEnabledByUser(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_USER_ENABLED, true)
     }
 }
 

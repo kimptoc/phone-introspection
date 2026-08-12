@@ -6,11 +6,23 @@
     android:orientation="vertical"
     android:padding="24dp">
 
+    <!-- minLines (not maxLines too) reserves a stable height budget, not
+         wrap_content: this text's content varies in wrapped-line-count
+         (the running state's fallback-active clause can wrap to a second
+         line on narrower screens), and with the buttons below in the same
+         vertical LinearLayout, a height that changes on every 5s refresh
+         shifts the whole button column under the user's finger. No
+         maxLines cap: a hard 3-line cap with no ellipsize would silently
+         clip real content (e.g. the last-sample line) at large
+         accessibility font scales, which is worse than an occasional
+         extra pixel of button movement in that rare case - this app
+         doesn't silently drop data anywhere else either. -->
     <TextView
         android:id="@+id/serviceStatusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="16sp"
+        android:minLines="3"
         android:text="@string/notification_title" />
 
     <Button

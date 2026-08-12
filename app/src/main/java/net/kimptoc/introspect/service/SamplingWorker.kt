@@ -51,5 +51,15 @@ class SamplingWorker(context: Context, params: WorkerParameters) : CoroutineWork
                 request,
             )
         }
+
+        // A user tapping "Stop monitoring" should mean monitoring actually
+        // stops, not "the foreground service stops but this 15-min fallback
+        // keeps sampling silently" (issue #1) - the resilience case this
+        // fallback exists for is Samsung killing the service *without* user
+        // action, which enqueuePeriodic() from the next Start covers same
+        // as before; an explicit Stop is a different, deliberate signal.
+        fun cancel(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK_NAME)
+        }
     }
 }
