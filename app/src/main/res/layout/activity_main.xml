@@ -6,11 +6,21 @@
     android:orientation="vertical"
     android:padding="24dp">
 
+    <!-- Fixed line budget, not wrap_content: this text's content varies
+         in wrapped-line-count (the running state adds a fallback-active
+         clause that can wrap to a second line on narrower screens), and
+         with the buttons below in the same vertical LinearLayout, a
+         height that changes on every 5s refresh shifts the whole button
+         column under the user's finger. minLines/maxLines both set to 3
+         (the longest real case: wrapped running-status line + the
+         last-sample line) keeps the layout stable regardless of content. -->
     <TextView
         android:id="@+id/serviceStatusText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:textSize="16sp"
+        android:minLines="3"
+        android:maxLines="3"
         android:text="@string/notification_title" />
 
     <Button
