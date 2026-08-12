@@ -17,14 +17,14 @@ package net.kimptoc.introspect.collector.t3
  * with real headroom above that, not just past it - the whole point of
  * this collector is the live state fields at the *tail* of the dump
  * (`mState`, `mScreenOn`, `mCharging`, `mNextAlarmTime`), and
- * [DumpsysService]'s cap keeps the *head*. A cap sized close to the
+ * [net.kimptoc.introspect.shizuku.DumpsysService]'s cap keeps the *head*. A cap sized close to the
  * measured length would silently amputate exactly the content this
  * collector exists to capture the moment the dump grows (more idling-
  * history entries, more allowlisted apps) past it - "dump" would still
  * look like a normal success, just missing the one section that
  * matters. [DumpsysCollector]'s truncated-flag handling makes that
  * condition detectable instead of silent if it ever happens anyway -
- * see [DumpsysService] for the three-round history of getting that
+ * see [net.kimptoc.introspect.shizuku.DumpsysService] for the three-round history of getting that
  * detection actually correct at the boundary. Hourly cadence, matching
  * [SensorServiceCollector]: the structural detail here doesn't need
  * finer resolution than that, and the cheap T0 doze collector already
