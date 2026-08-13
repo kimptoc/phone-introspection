@@ -759,6 +759,8 @@ git commit -m "Add TimelineActivity shell: layout, navigation, range picker"
 
 **Why a custom X-axis unit:** MPAndroidChart's `Entry.x`/`Entry.y` are `Float`. Epoch-millisecond timestamps (13 digits) exceed `Float`'s exact-integer range (~16.7 million), so plotting raw millis directly causes visible jitter/misalignment. Every chart X value in this task is instead **seconds since `rangeStartMs`** — small enough to stay exact, and there's no need for sub-second precision at this app's 60-second sampling cadence (spec §4).
 
+**Amended after Task 5's on-device verification**: Task 5 discovered that Android 15+'s edge-to-edge enforcement (the same issue `MainActivity` already works around) rendered the range-picker buttons unreachable — underneath the status bar — without inset handling, and added an `applySystemBarInsetsAsPadding` helper mirroring `MainActivity`'s. The full-file listing below **includes that fix**; it is not optional scaffolding to drop.
+
 - [ ] **Step 1: Replace the placeholder `loadRange` with real chart wiring**
 
 Edit `app/src/main/java/net/kimptoc/introspect/timeline/TimelineActivity.kt` in full:
@@ -768,9 +770,12 @@ package net.kimptoc.introspect.timeline
 
 import android.graphics.Color
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.data.Entry
@@ -801,6 +806,11 @@ class TimelineActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_timeline)
+        // Android 15+ (targetSdk 35+) enforces edge-to-edge, same as
+        // MainActivity: without this the range-picker button row renders
+        // (and is tappable) underneath the status bar/action bar rather
+        // than below it (found on-device during Task 5).
+        applySystemBarInsetsAsPadding(findViewById(R.id.timelineRootLayout))
         repository = TimelineRepository(this)
         batteryChart = findViewById(R.id.batteryChart)
         emptyStateText = findViewById(R.id.timelineEmptyStateText)
@@ -850,6 +860,26 @@ class TimelineActivity : ComponentActivity() {
                     android.widget.Toast.LENGTH_LONG,
                 ).show()
             }
+        }
+    }
+
+    /**
+     * Mirrors MainActivity.applySystemBarInsetsAsPadding: without it,
+     * edge-to-edge draws this screen's content behind the status bar and
+     * the window's action bar, leaving the top row of range buttons
+     * visually hidden and untappable (confirmed on-device in Task 5).
+     */
+    private fun applySystemBarInsetsAsPadding(root: View) {
+        val basePadding = root.paddingLeft
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                basePadding + bars.left,
+                basePadding + bars.top,
+                basePadding + bars.right,
+                basePadding + bars.bottom,
+            )
+            insets
         }
     }
 }
