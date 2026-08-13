@@ -60,6 +60,9 @@ dependencies {
     // instance, no root required.
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
+
+    // Phase 5 (UI): timeline view charting.
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 }
 
 // T2 (spec §3) adb grants are wiped on every reinstall - wire provisioning
