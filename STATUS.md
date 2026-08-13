@@ -671,16 +671,115 @@ column, alongside the earlier server-death incidents.
 Spec §3's entire named T3 dumpsys list (`batterystats`,
 `sensorservice`, `deviceidle`, `cpuinfo`, `power`) is now shipped.
 
+## 2026-08-12: MainActivity status UI fixed (issue #1, PR #19)
+
+All four points from issue #1: toggle button now reads
+`MonitoringService.isRunning` (a volatile companion flag set in
+`onCreate`/`onDestroy`) instead of a local boolean that started false
+on every launch regardless of reality; "Stop monitoring" now cancels
+the `SamplingWorker` WorkManager fallback too, not just the
+foreground service; tier status list has short per-tier labels; status
+text shows last-sample age and row count, kept live via a
+`repeatOnLifecycle(RESUMED)` 5s poll.
+
+**Bot review round 1** caught three issues, all fixed: the toggle
+click was reading `isRunning` back *after* calling `start()`/`stop()`,
+before `onCreate()`/`onDestroy()` had actually run, so the tap still
+showed the pre-tap state — fixed by deciding the intent up front
+(`targetRunning = !isRunning`) and driving the UI from that instead;
+`refreshServiceStatus()` spawned a fresh unawaited coroutine on every
+5s tick and every tap, outliving `repeatOnLifecycle`'s own
+cancellation — made `suspend` and called directly from the existing
+loop coroutine; hardcoded English strings moved to `strings.xml`.
+
+**Bot review round 2** caught that round 1's own fix was still
+broken: `lifecycleScope` runs on `Dispatchers.Main.immediate`, so the
+click handler's `launch { refreshServiceStatus() }` executed *inline*
+in the same call stack, re-deriving the not-yet-updated
+`isRunning` and immediately overwriting the fresh label with the
+stale one — same bug, one frame later. Fixed by passing the decided
+intent through as a `forceRunning` parameter instead of re-deriving
+it. Also flagged a `maxLines=3` truncation risk on the status text
+(added in the same round for layout stability) at large accessibility
+font scales — dropped `maxLines`, kept `minLines=3` for the stable
+height budget without capping content.
+
+**A genuine bug surfaced during manual on-device verification**,
+independent of the bot: `BootReceiver` was restarting monitoring
+unconditionally on every boot, which would have silently un-stopped
+an explicit "Stop" tap after a reboot — the exact "UI says one thing,
+reality does another" failure this issue exists to close, just
+reboot-triggered. Fixed by persisting user intent via a
+`monitoring_state` SharedPreferences flag (`start()`/`stop()` both
+write it, default `true` so existing boot-restart resilience is
+unaffected for anyone who's never tapped Stop) that `BootReceiver`
+checks before restarting anything.
+
+Verification here was itself a lesson: an early WorkManager-cancel
+check read `no_backup/androidx.work.workdb` without its `-wal` file
+and showed a stale pre-cancel snapshot — same class of artifact as
+the `introspect.db` "malformed" pull earlier in the project. Fixed by
+pulling all three SQLite files (`.db`/`-wal`/`-shm`) together so
+SQLite replays the WAL on open.
+
+## 2026-08-12: filed issue #20 — `myhourly:StepCounterWakeLock` held 2+ days continuously
+
+`PowerCollector`'s wake-lock data, checked again: the same lock
+(`uid=10719`, `pid=12316`, `lock=7625c29` — same ID across both
+checks, confirming one continuous hold, not repeated re-acquisition)
+went from 2d11h to 2d18h between two captures a few hours apart.
+Cross-referenced: `usage_foreground` shows zero recent foreground
+time for `com.example.myhourlystepcounterv2`, yet
+`BatteryAttributionCollector` shows it attributing real mAh in most
+2-hour windows — a background app being kept alive by its own
+held-forever wake lock, exactly the pattern `PowerCollector` was
+built to catch. Filed as issue #20 (third-party app, not something to
+fix in Introspect) with four concrete investigation angles, including
+whether the step counter's own sensor batching (spec §8) could
+replace the wake lock entirely.
+
+## 2026-08-12/13: multi-day stats review — Android Auto churn is longstanding, Doze/drain numbers are confounded by this week's dev work
+
+Pulled the full dataset and checked the days since the 2026-08-08
+improvement:
+
+- **Doze engagement collapsed again**: 33.6% (08-09) → 13.5% (08-10)
+  → 0.0% (08-11) → 0.4% (08-12), tracking `power_save` going from
+  100% → 63.5% → 0% → 0% on the same days. Can't cleanly separate
+  cause from confound: 08-11/08-12 were also the heaviest dev-testing
+  days this project has had (repeated reinstalls, constant screen
+  wake, adb activity), which independently suppresses Doze regardless
+  of any platform issue. **Not a confirmed regression** — needs a
+  quiet non-dev day to re-check cleanly.
+- **Drain rates crept back to 6–10%/hr** across discharge segments,
+  above the 08-08 ~5.5%/hr improvement — same confound applies, these
+  overlap active dev-session use, not clean idle windows.
+- **Android Auto reconnect churn: confirmed longstanding, not a
+  recent regression.** User asked whether the current ~40–80
+  reconnects/hour during actual driving (08-11/08-12) reflects the
+  dongle getting worse. Checked peak *hourly* reconnect rate across
+  the full dataset instead of just daily totals: 08-06 (before the
+  dongle was unplugged) peaked at **265/hour, sustained 220–265/hr
+  from 2am–6am** — provably not driving. That's higher than anything
+  measured since. Conclusion: the flaky-reconnect-while-paired rate
+  looks roughly constant across the whole observation window: what
+  changed on 08-07 was *exposure* (unplugging when not driving cut
+  the ~20 idle hours/day it used to churn through), not the
+  underlying churn rate itself. **Can't tell if it predates One UI
+  8.5** - the dataset only starts 2026-08-05, and we don't know
+  whether the phone was already on 8.5 by then; the only 8.5-specific
+  evidence remains the external corroborating reports found
+  2026-08-07, not anything measured on this device.
+
 ## Next
 
-- `myhourly:StepCounterWakeLock` held for 2 days 11 hours, spotted in
-  `PowerCollector`'s first real capture — a wake lock held that long
-  is itself worth investigating, independent of any collector work.
-- Keep monitoring the post-2026-08-07 improvement (Doze engagement,
-  drain rate) — if it holds for several more days that's a good signal
-  for the Samsung thread; if it regresses, check whether the games
-  crept back to Optimised or something else changed.
+- `myhourly:StepCounterWakeLock` investigation — issue #20, third-party
+  app, not blocking any Introspect work.
+- Re-check Doze engagement / drain rate on a genuinely quiet
+  (non-dev-session) day to separate the real signal from this week's
+  confound before drawing conclusions for the Samsung thread.
+- Consider sending Samsung an update on the Android Auto per-hour
+  churn-during-use finding (194–232 events clustered into 4–5hr
+  driving windows on 08-11/08-12) — user's call on timing/wording.
 - Phase 5 (UI): timeline view aligning app sessions against thermal
-  state and battery drain. No new device access needed; could be
-  started independently of T3 work.
-- Issue #1: MainActivity doesn't clearly show what's actually running.
+  state and battery drain. No new device access needed.
