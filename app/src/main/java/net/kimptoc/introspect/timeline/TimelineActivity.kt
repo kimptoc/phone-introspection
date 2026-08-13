@@ -2,6 +2,7 @@ package net.kimptoc.introspect.timeline
 
 import android.graphics.Color
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
@@ -13,6 +14,8 @@ import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
+import com.github.mikephil.charting.listener.ChartTouchListener
+import com.github.mikephil.charting.listener.OnChartGestureListener
 import kotlinx.coroutines.launch
 import net.kimptoc.introspect.R
 import net.kimptoc.introspect.collector.t1.UsageAccess
@@ -31,6 +34,9 @@ class TimelineActivity : ComponentActivity() {
     private lateinit var repository: TimelineRepository
     private lateinit var batteryChart: LineChart
     private lateinit var emptyStateText: TextView
+    private lateinit var thermalBand: TimelineBandView
+    private lateinit var dozeBand: TimelineBandView
+    private lateinit var sessionsBand: TimelineBandView
 
     private var rangeStartMs = 0L
     private var rangeEndMs = 1L
@@ -46,6 +52,19 @@ class TimelineActivity : ComponentActivity() {
         repository = TimelineRepository(this)
         batteryChart = findViewById(R.id.batteryChart)
         emptyStateText = findViewById(R.id.timelineEmptyStateText)
+        thermalBand = findViewById(R.id.thermalBand)
+        dozeBand = findViewById(R.id.dozeBand)
+        sessionsBand = findViewById(R.id.sessionsBand)
+        batteryChart.onChartGestureListener = object : OnChartGestureListener {
+            override fun onChartGestureStart(me: MotionEvent?, lastGesture: ChartTouchListener.ChartGesture?) {}
+            override fun onChartGestureEnd(me: MotionEvent?, lastGesture: ChartTouchListener.ChartGesture?) = syncBandsToChart()
+            override fun onChartLongPressed(me: MotionEvent?) {}
+            override fun onChartDoubleTapped(me: MotionEvent?) {}
+            override fun onChartSingleTapped(me: MotionEvent?) {}
+            override fun onChartFling(me1: MotionEvent?, me2: MotionEvent?, velocityX: Float, velocityY: Float) {}
+            override fun onChartScale(me: MotionEvent?, scaleX: Float, scaleY: Float) = syncBandsToChart()
+            override fun onChartTranslate(me: MotionEvent?, dX: Float, dY: Float) = syncBandsToChart()
+        }
         batteryChart.description.isEnabled = false
 
         findViewById<Button>(R.id.range24hButton).setOnClickListener { loadRange(TimelineRange.LAST_24H) }
@@ -57,6 +76,16 @@ class TimelineActivity : ComponentActivity() {
     }
 
     private fun timestampToX(ts: Long): Float = (ts - rangeStartMs) / 1000f
+
+    private fun xToTimestamp(x: Float): Long = rangeStartMs + (x * 1000).toLong()
+
+    private fun syncBandsToChart() {
+        val startMs = xToTimestamp(batteryChart.lowestVisibleX)
+        val endMs = xToTimestamp(batteryChart.highestVisibleX)
+        thermalBand.setVisibleRange(startMs, endMs)
+        dozeBand.setVisibleRange(startMs, endMs)
+        sessionsBand.setVisibleRange(startMs, endMs)
+    }
 
     private fun loadRange(range: TimelineRange) {
         lifecycleScope.launch {
@@ -84,6 +113,60 @@ class TimelineActivity : ComponentActivity() {
             batteryChart.data = LineData(dataSet)
             batteryChart.notifyDataSetChanged()
             batteryChart.invalidate()
+
+            val thermalColors = mapOf(
+                "none" to Color.rgb(200, 230, 200),
+                "light" to Color.rgb(255, 235, 150),
+                "moderate" to Color.rgb(255, 180, 80),
+                "severe" to Color.rgb(255, 100, 60),
+                "critical" to Color.rgb(220, 40, 40),
+                "emergency" to Color.rgb(150, 0, 0),
+                "shutdown" to Color.rgb(80, 0, 0),
+                "unknown" to Color.LTGRAY,
+            )
+            thermalBand.setSegments(
+                repository.loadThermal(startMs, endMs).map {
+                    TimelineBandView.Segment(it.startMs, it.endMs, thermalColors[it.value] ?: Color.LTGRAY, it.value)
+                },
+            )
+
+            val deviceIdle = repository.loadDeviceIdle(startMs, endMs)
+            val screenOn = repository.loadScreenOn(startMs, endMs)
+            // One combined band: screen_on takes visual priority (drawn
+            // second, so it wins where both series would otherwise
+            // overlap) since an interactive screen is the more actionable
+            // state to see at a glance than Doze specifically.
+            dozeBand.setSegments(
+                deviceIdle.map {
+                    TimelineBandView.Segment(
+                        it.startMs, it.endMs,
+                        if (it.value) Color.rgb(150, 180, 255) else Color.LTGRAY,
+                        if (it.value) "idle" else "active",
+                    )
+                } + screenOn.map {
+                    TimelineBandView.Segment(
+                        it.startMs, it.endMs,
+                        if (it.value) Color.rgb(255, 220, 100) else Color.TRANSPARENT,
+                        if (it.value) "screen on" else "screen off",
+                    )
+                },
+            )
+
+            val sessionColors = listOf(
+                Color.rgb(120, 190, 230), Color.rgb(230, 160, 120), Color.rgb(160, 210, 130),
+                Color.rgb(220, 150, 200), Color.rgb(210, 210, 120),
+            )
+            val packageColor = mutableMapOf<String, Int>()
+            sessionsBand.setSegments(
+                repository.loadAppSessions(startMs, endMs).map { session ->
+                    val color = packageColor.getOrPut(session.packageName) {
+                        sessionColors[packageColor.size % sessionColors.size]
+                    }
+                    TimelineBandView.Segment(session.startMs, session.endMs, color, session.packageName)
+                },
+            )
+
+            syncBandsToChart()
 
             if (!UsageAccess.isGranted(this@TimelineActivity)) {
                 android.widget.Toast.makeText(
