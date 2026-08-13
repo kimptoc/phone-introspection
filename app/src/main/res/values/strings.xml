@@ -18,4 +18,8 @@
     <string name="last_sample_ago">last sample %ds ago</string>
     <string name="fallback_also_active">(15-min fallback also active)</string>
     <string name="total_samples">%d total</string>
+    <string name="timeline_range_24h">Last 24h</string>
+    <string name="timeline_range_3d">Last 3 days</string>
+    <string name="timeline_range_7d">Last 7 days</string>
+    <string name="timeline_range_all">All time</string>
 </resources>
