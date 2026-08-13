@@ -45,6 +45,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".timeline.TimelineActivity"
+            android:label="@string/timeline_title"
+            android:exported="false" />
+
         <service
             android:name=".service.MonitoringService"
             android:exported="false"

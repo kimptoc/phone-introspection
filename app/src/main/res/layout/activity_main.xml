@@ -60,6 +60,13 @@
         android:layout_marginTop="8dp"
         android:text="@string/grant_shizuku_access" />
 
+    <Button
+        android:id="@+id/openTimelineButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/open_timeline" />
+
     <TextView
         android:id="@+id/tierStatusText"
         android:layout_width="match_parent"

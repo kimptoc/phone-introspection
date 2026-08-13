@@ -22,4 +22,11 @@
     <string name="timeline_range_3d">Last 3 days</string>
     <string name="timeline_range_7d">Last 7 days</string>
     <string name="timeline_range_all">All time</string>
+    <string name="open_timeline">Open timeline</string>
+    <string name="timeline_title">Timeline</string>
+    <string name="timeline_band_thermal">Thermal state</string>
+    <string name="timeline_band_doze">Doze / screen on</string>
+    <string name="timeline_band_sessions">App sessions</string>
+    <string name="timeline_no_data">No data in this range</string>
+    <string name="timeline_grant_usage_access">Grant usage access to see app sessions</string>
 </resources>
