@@ -755,7 +755,7 @@ git commit -m "Add TimelineActivity shell: layout, navigation, range picker"
 
 **Interfaces:**
 - Consumes: `TimelineRepository.loadBattery()` (Task 3), `net.kimptoc.introspect.collector.t1.UsageAccess.isGranted()` (existing).
-- Produces: `TimelineActivity.rangeStartMs: Long` / `rangeEndMs: Long` (instance state Task 7 reads to size its bands), `TimelineActivity.timestampToX(ts: Long): Float` / `xToTimestamp(x: Float): Long` (the millis↔chart-X mapping Task 7 and Task 8 both need).
+- Produces: `TimelineActivity.rangeStartMs: Long` / `rangeEndMs: Long` (instance state Task 7 reads to size its bands), `TimelineActivity.timestampToX(ts: Long): Float` (the millis→chart-X mapping). The inverse, `xToTimestamp(x: Float): Long`, is defined in Task 7 itself (not here) since it's only needed starting there.
 
 **Why a custom X-axis unit:** MPAndroidChart's `Entry.x`/`Entry.y` are `Float`. Epoch-millisecond timestamps (13 digits) exceed `Float`'s exact-integer range (~16.7 million), so plotting raw millis directly causes visible jitter/misalignment. Every chart X value in this task is instead **seconds since `rangeStartMs`** — small enough to stay exact, and there's no need for sub-second precision at this app's 60-second sampling cadence (spec §4).
 
