@@ -56,6 +56,22 @@ class MainActivity : ComponentActivity() {
 
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
+        // If the user's persisted intent (MonitoringService.isEnabledByUser,
+        // default true - see issue #1) is "monitoring should be running"
+        // but it isn't actually running, start it here rather than making
+        // the user notice and re-tap Start. Previously this intent was
+        // only acted on by BootReceiver, i.e. only at device boot - a
+        // reinstall (which force-stops the service, no reboot involved)
+        // left monitoring off until manually restarted, which is exactly
+        // what happened and confused an actual user of this app. Defaults
+        // to on for a fresh install too: this app's whole purpose is
+        // continuous self-monitoring, opted into by installing it at all.
+        if (MonitoringService.isEnabledByUser(this) && !MonitoringService.isRunning) {
+            requestNotificationPermissionIfNeeded()
+            MonitoringService.start(this)
+            SamplingWorker.enqueuePeriodic(this)
+        }
+
         toggleButton.setOnClickListener {
             // The intent, decided *before* start()/stop() are called, not
             // read back from MonitoringService.isRunning afterwards -
