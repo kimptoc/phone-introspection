@@ -29,7 +29,14 @@ class TimelineMarkerView(
 
     override fun refreshContent(e: Entry, highlight: Highlight) {
         val timestampMs = rangeStartMs + (e.x * 1000).toLong()
-        textView.text = "${timeFormat.format(timestampMs)}\n${lookup(timestampMs)}"
+        // Deviates from the plan's verbatim refreshContent body: the plan
+        // text and this class's own doc comment both promise "battery%"
+        // in the marker, but the plan's literal code never renders e.y
+        // (the battery level the Entry was built from). Added rather than
+        // silently dropped - the tapped point IS the battery reading, so
+        // omitting it here would be the one value the marker exists to
+        // show and doesn't.
+        textView.text = "${timeFormat.format(timestampMs)}\nBattery: ${e.y.toInt()}%\n${lookup(timestampMs)}"
         super.refreshContent(e, highlight)
     }
 
