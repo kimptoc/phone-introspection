@@ -57,18 +57,42 @@ class TimelineRepository(private val context: Context) {
     /**
      * Sessions still open at [endMs] (the app was in the foreground when
      * the loaded range ends) are capped there rather than dropped - an
-     * ongoing session at the visible edge is real data, not noise.
+     * ongoing session at the visible edge is real data, not noise. The
+     * same is now true at the [startMs] edge (bot review on PR #21): a
+     * session already in progress when the range begins is seeded from
+     * [SampleDao.lastUsageEventBeforeRange] rather than silently vanishing
+     * because its `activity_resumed` falls outside the query window - both
+     * edges clip an unknown true boundary to the visible range rather than
+     * pretending the session doesn't exist.
+     *
+     * A resume that arrives while one is already open for that package
+     * (no intervening pause/stop - e.g. the process died) closes the prior
+     * session at that point rather than merging both episodes into one
+     * session spanning a gap where the app wasn't actually foregrounded. A
+     * pause/stop with no open start (missed by both the lookback and the
+     * in-range resume - a genuinely orphaned event) is synthesized from
+     * [startMs] rather than dropped, consistent with "missing signal is a
+     * gap, never silently dropped" - a same-length phantom session in that
+     * rare case is far less harmful than an invisible real one.
      */
     suspend fun loadAppSessions(startMs: Long, endMs: Long): List<AppSession> {
         val events = dao.usageEventsInRange(startMs, endMs)
         val openStarts = mutableMapOf<String, Long>()
+        dao.lastUsageEventBeforeRange(startMs).forEach { row ->
+            if (row.valueText == "activity_resumed") openStarts[row.key] = startMs
+        }
+
         val sessions = mutableListOf<AppSession>()
         for (event in events) {
             when (event.valueText) {
-                "activity_resumed" -> openStarts.putIfAbsent(event.key, event.timestamp)
+                "activity_resumed" -> {
+                    val alreadyOpen = openStarts[event.key]
+                    if (alreadyOpen != null) sessions += AppSession(event.key, alreadyOpen, event.timestamp)
+                    openStarts[event.key] = event.timestamp
+                }
                 "activity_paused", "activity_stopped" -> {
-                    val start = openStarts.remove(event.key)
-                    if (start != null) sessions += AppSession(event.key, start, event.timestamp)
+                    val start = openStarts.remove(event.key) ?: startMs
+                    sessions += AppSession(event.key, start, event.timestamp)
                 }
             }
         }

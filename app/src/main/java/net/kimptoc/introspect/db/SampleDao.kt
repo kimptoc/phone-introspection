@@ -76,6 +76,26 @@ interface SampleDao {
     )
     suspend fun usageEventsInRange(startMs: Long, endMs: Long): List<UsageEventRow>
 
+    // For each package, the single most recent lifecycle event before
+    // startMs - used to detect a session already in progress when a range
+    // begins (bot review on PR #21: without this, loadAppSessions silently
+    // drops the visible portion of any session that started before the
+    // loaded window). GROUP BY key with a bare value_text column alongside
+    // MAX(timestamp) is a documented SQLite behavior, not an arbitrary-row
+    // pick: with exactly one MAX() aggregate present, every bare column
+    // takes its value from the row that produced that MAX - verified
+    // against this exact query shape with sqlite3 3.37.0 before shipping.
+    @Query(
+        """
+        SELECT key, MAX(timestamp) AS timestamp, value_text FROM samples
+        WHERE collector_id = 'usage_events'
+          AND value_text IN ('activity_resumed', 'activity_paused', 'activity_stopped')
+          AND timestamp < :startMs
+        GROUP BY key
+        """,
+    )
+    suspend fun lastUsageEventBeforeRange(startMs: Long): List<UsageEventRow>
+
     @Query("SELECT MIN(timestamp) FROM samples")
     suspend fun earliestTimestamp(): Long?
 

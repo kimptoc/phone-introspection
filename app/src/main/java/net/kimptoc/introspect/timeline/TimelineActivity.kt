@@ -50,7 +50,6 @@ class TimelineActivity : ComponentActivity() {
     // for that call's OWN chart-building math, which uses the startMs/endMs
     // locals instead (see loadRange's doc comment for why).
     private var rangeStartMs = 0L
-    private var rangeEndMs = 1L
 
     private var loadedThermal: List<TimelineSegment<String>> = emptyList()
     private var loadedDeviceIdle: List<TimelineSegment<Boolean>> = emptyList()
@@ -134,12 +133,16 @@ class TimelineActivity : ComponentActivity() {
             val entries = battery.mapNotNull { row ->
                 row.valueNum?.let { Entry(toX(row.timestamp), it.toFloat()) }
             }
-            val dataSet = LineDataSet(entries, getString(R.string.timeline_band_thermal).let { "" }).apply {
+            val dataSet = LineDataSet(entries, "").apply {
                 color = Color.BLUE
                 setDrawCircles(false)
                 lineWidth = 2f
             }
             batteryChart.data = LineData(dataSet)
+            // This chart only ever holds one series and its own description
+            // is already hidden - a legend entry for a blank label is just
+            // an empty box, not information (bot review on PR #21).
+            batteryChart.legend.isEnabled = false
             batteryChart.xAxis.valueFormatter = object : ValueFormatter() {
                 private val format = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())
                 override fun getFormattedValue(value: Float): String =
@@ -220,11 +223,10 @@ class TimelineActivity : ComponentActivity() {
             }
 
             // Updated now, after all per-call chart-building math above is
-            // done reading startMs/endMs as locals - see loadRange's doc
+            // done reading startMs as a local - see loadRange's doc
             // comment. syncBandsToChart/xToTimestamp below legitimately
-            // need the current range in these fields.
+            // need the current range's start in this field.
             rangeStartMs = startMs
-            rangeEndMs = endMs
 
             syncBandsToChart()
 
