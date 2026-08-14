@@ -17,7 +17,12 @@ data class AppSession(val packageName: String, val startMs: Long, val endMs: Lon
  * method is scoped to an explicit (startMs, endMs) window - the `samples`
  * table is 400K+ rows and growing, so nothing here ever loads it whole
  * (spec §7's storage-growth caution applies to reading it back out too,
- * not just writing it).
+ * not just writing it) - **except [loadAppSessions]**: `usage_events` has
+ * no bucketed/downsampled query variant (unlike [loadBattery]/[loadThermal]/
+ * [loadDeviceIdle]/[loadScreenOn], which bucket via [bucketMsFor] at wide
+ * ranges), so at ALL_TIME it loads every usage_events row in the table.
+ * Known growth risk, not fixed here - a downsampled or capped session
+ * query is future work, not in scope for this pass.
  */
 class TimelineRepository(private val context: Context) {
 
