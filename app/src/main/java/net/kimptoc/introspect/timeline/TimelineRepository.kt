@@ -74,12 +74,28 @@ class TimelineRepository(private val context: Context) {
      * [startMs] rather than dropped, consistent with "missing signal is a
      * gap, never silently dropped" - a same-length phantom session in that
      * rare case is far less harmful than an invisible real one.
+     *
+     * The lookback is only trusted if monitoring was actually producing
+     * data up to (or past) [startMs] - checked via [SampleDao.lastTimestamp].
+     * Found on-device verifying this exact fix: an `activity_resumed` with
+     * no pairing pause can also mean monitoring itself stopped right after
+     * (Samsung killing the service, spec §7) rather than the app staying
+     * genuinely foregrounded - a 39-hour-old dangling resume synthesized a
+     * session spanning an entire, otherwise-empty "Last 24h" range and
+     * silently suppressed the "no data" state. If the last real sample in
+     * the whole table predates [startMs], there is no contemporaneous
+     * evidence the app was still in the foreground, so the lookback is
+     * skipped entirely for that call - matches this range's genuinely
+     * empty reality instead of extrapolating across a monitoring gap.
      */
     suspend fun loadAppSessions(startMs: Long, endMs: Long): List<AppSession> {
         val events = dao.usageEventsInRange(startMs, endMs)
         val openStarts = mutableMapOf<String, Long>()
-        dao.lastUsageEventBeforeRange(startMs).forEach { row ->
-            if (row.valueText == "activity_resumed") openStarts[row.key] = startMs
+        val monitoringWasLiveAtRangeStart = (dao.lastTimestamp() ?: 0L) >= startMs
+        if (monitoringWasLiveAtRangeStart) {
+            dao.lastUsageEventBeforeRange(startMs).forEach { row ->
+                if (row.valueText == "activity_resumed") openStarts[row.key] = startMs
+            }
         }
 
         val sessions = mutableListOf<AppSession>()
