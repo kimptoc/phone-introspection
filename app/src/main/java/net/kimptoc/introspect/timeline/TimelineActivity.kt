@@ -41,6 +41,11 @@ class TimelineActivity : ComponentActivity() {
     private var rangeStartMs = 0L
     private var rangeEndMs = 1L
 
+    private var loadedThermal: List<TimelineSegment<String>> = emptyList()
+    private var loadedDeviceIdle: List<TimelineSegment<Boolean>> = emptyList()
+    private var loadedScreenOn: List<TimelineSegment<Boolean>> = emptyList()
+    private var loadedSessions: List<AppSession> = emptyList()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_timeline)
@@ -124,14 +129,17 @@ class TimelineActivity : ComponentActivity() {
                 "shutdown" to Color.rgb(80, 0, 0),
                 "unknown" to Color.LTGRAY,
             )
+            loadedThermal = repository.loadThermal(startMs, endMs)
             thermalBand.setSegments(
-                repository.loadThermal(startMs, endMs).map {
+                loadedThermal.map {
                     TimelineBandView.Segment(it.startMs, it.endMs, thermalColors[it.value] ?: Color.LTGRAY, it.value)
                 },
             )
 
-            val deviceIdle = repository.loadDeviceIdle(startMs, endMs)
-            val screenOn = repository.loadScreenOn(startMs, endMs)
+            loadedDeviceIdle = repository.loadDeviceIdle(startMs, endMs)
+            loadedScreenOn = repository.loadScreenOn(startMs, endMs)
+            val deviceIdle = loadedDeviceIdle
+            val screenOn = loadedScreenOn
             // One combined band: screen_on takes visual priority (drawn
             // second, so it wins where both series would otherwise
             // overlap) since an interactive screen is the more actionable
@@ -157,8 +165,9 @@ class TimelineActivity : ComponentActivity() {
                 Color.rgb(220, 150, 200), Color.rgb(210, 210, 120),
             )
             val packageColor = mutableMapOf<String, Int>()
+            loadedSessions = repository.loadAppSessions(startMs, endMs)
             sessionsBand.setSegments(
-                repository.loadAppSessions(startMs, endMs).map { session ->
+                loadedSessions.map { session ->
                     val color = packageColor.getOrPut(session.packageName) {
                         sessionColors[packageColor.size % sessionColors.size]
                     }
@@ -167,6 +176,15 @@ class TimelineActivity : ComponentActivity() {
             )
 
             syncBandsToChart()
+
+            batteryChart.marker = TimelineMarkerView(this@TimelineActivity, rangeStartMs) { timestampMs ->
+                buildString {
+                    append(loadedThermal.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Thermal: $it\n" } ?: "")
+                    append(loadedDeviceIdle.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Idle: $it\n" } ?: "")
+                    append(loadedScreenOn.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Screen on: $it\n" } ?: "")
+                    append(loadedSessions.firstOrNull { timestampMs in it.startMs..it.endMs }?.packageName?.let { "App: $it" } ?: "")
+                }.trimEnd()
+            }
 
             if (!UsageAccess.isGranted(this@TimelineActivity)) {
                 android.widget.Toast.makeText(
