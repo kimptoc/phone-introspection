@@ -98,9 +98,21 @@ class TimelineActivity : ComponentActivity() {
     private fun syncBandsToChart() {
         val startMs = xToTimestamp(batteryChart.lowestVisibleX)
         val endMs = xToTimestamp(batteryChart.highestVisibleX)
+        // The chart's plot area is inset from its own view bounds by the
+        // Y-axis value labels (and the right axis) - without passing this
+        // through, the bands (which draw across their own full width)
+        // were visibly wider than the data they're meant to align under.
+        // Recomputed on every call rather than once: cheap reads, and the
+        // inset can genuinely change between ranges if Y-axis label width
+        // changes (e.g. "100" vs a narrower value).
+        val contentLeft = batteryChart.viewPortHandler.contentLeft()
+        val contentRight = batteryChart.viewPortHandler.contentRight()
         thermalBand.setVisibleRange(startMs, endMs)
+        thermalBand.setContentInsets(contentLeft, contentRight)
         dozeBand.setVisibleRange(startMs, endMs)
+        dozeBand.setContentInsets(contentLeft, contentRight)
         sessionsBand.setVisibleRange(startMs, endMs)
+        sessionsBand.setContentInsets(contentLeft, contentRight)
     }
 
     /**

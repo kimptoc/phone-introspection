@@ -15,6 +15,17 @@ import android.view.View
  * by [TimelineActivity] from the battery [com.github.mikephil.charting.charts.LineChart]'s
  * own pan/zoom state, keeping all bands in sync with it without this
  * view needing its own gesture handling.
+ *
+ * [setContentInsets] does the same for horizontal alignment: this view
+ * spans its full measured width, but the chart above it doesn't - its
+ * plot area is inset on the left by the Y-axis value labels (and
+ * potentially the right, if a right axis is enabled), so drawing bands
+ * across this view's *entire* width made them visibly wider than the
+ * data they're meant to line up under. [TimelineActivity] reads the
+ * chart's real plot-area bounds via its `ViewPortHandler` and passes
+ * them straight through, since both this view and the chart share the
+ * same `match_parent` width within the same parent layout - no
+ * coordinate transform needed, just reusing the same pixel offsets.
  */
 class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
 
@@ -23,6 +34,8 @@ class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(con
     private var segments: List<Segment> = emptyList()
     private var visibleStartMs: Long = 0L
     private var visibleEndMs: Long = 1L
+    private var contentLeft: Float = 0f
+    private var contentRight: Float = -1f // -1 means "unset, use full width"
     private val paint = Paint()
 
     fun setSegments(newSegments: List<Segment>) {
@@ -36,14 +49,24 @@ class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(con
         invalidate()
     }
 
+    fun setContentInsets(left: Float, right: Float) {
+        contentLeft = left
+        contentRight = right
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val span = (visibleEndMs - visibleStartMs).toFloat()
         if (span <= 0f || width == 0) return
+        val drawLeft = contentLeft
+        val drawRight = if (contentRight < 0f) width.toFloat() else contentRight
+        val drawWidth = drawRight - drawLeft
+        if (drawWidth <= 0f) return
         for (segment in segments) {
             if (segment.endMs < visibleStartMs || segment.startMs > visibleEndMs) continue
-            val left = ((segment.startMs - visibleStartMs) / span * width).coerceIn(0f, width.toFloat())
-            val right = ((segment.endMs - visibleStartMs) / span * width).coerceIn(0f, width.toFloat())
+            val left = (drawLeft + (segment.startMs - visibleStartMs) / span * drawWidth).coerceIn(drawLeft, drawRight)
+            val right = (drawLeft + (segment.endMs - visibleStartMs) / span * drawWidth).coerceIn(drawLeft, drawRight)
             if (right <= left) continue
             paint.color = segment.color
             canvas.drawRect(left, 0f, right, height.toFloat(), paint)
