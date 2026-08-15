@@ -771,6 +771,66 @@ improvement:
   evidence remains the external corroborating reports found
   2026-08-07, not anything measured on this device.
 
+## 2026-08-13/15: Phase 5 (UI) shipped — timeline view, plus a fix for the gap that prompted the whole "why is nothing running" question
+
+**`TimelineActivity`** (PR #21): battery level, thermal state, Doze/
+screen-on state, and app sessions charted on a shared, pan/zoomable
+time axis (MPAndroidChart `LineChart` + a custom `TimelineBandView`
+for the three categorical bands), with a 24h/3d/7d/all-time range
+picker (7d/all downsample in SQL to keep queries bounded against the
+400K+-row `samples` table) and a tap-marker showing exact values.
+Design and 8-task plan written up front
+(`docs/superpowers/specs/2026-08-13-phase5-timeline-design.md`,
+`docs/superpowers/plans/2026-08-13-phase5-timeline.md`) and built via
+subagent-driven-development — a fresh implementer + fresh reviewer
+per task, then a final whole-branch review.
+
+The final review caught two real cross-task integration bugs
+invisible to any single task's diff: stale bands left on screen when
+switching to an empty range (also incorrectly gated on battery alone
+rather than each signal independently), and a race where rapid
+range-switching could corrupt the chart's X-axis origin. Bot review
+on the resulting PR then caught three more, all confirmed against
+real on-device data before fixing rather than taken on faith: a
+phantom "still open" app session synthesized from a 39-hour-old
+dangling `activity_resumed` with no pairing close (this device's
+monitoring had been stopped since 2026-08-12, so the range being
+tested was genuinely empty) that suppressed the "no data" state;
+the same phantom walking back in via a wider range because the fix
+only gated one of two paths that could produce it; and — the sharpest
+one — `UsageEventsCollector`'s own source data firing **both**
+`activity_paused` and `activity_stopped` for every single real
+backgrounding, which meant the second of every pair was mistaken for
+a genuinely orphaned close and synthesized a phantom session on
+*every* backgrounding in the range, not just the rare true-orphan
+case the fallback was meant for. One SQL-correctness claim from the
+bot was disputed and verified wrong before responding: the bare-
+column-alongside-`MIN()`/`MAX()` GROUP BY trick this code relies on
+*is* documented, deterministic SQLite behavior, confirmed against the
+exact query shape with `sqlite3` directly (twice, with non-monotonic
+insertion order) rather than assumed either way.
+
+**Auto-start monitoring on open** (PR #22): the Timeline work's own
+verification surfaced the question that prompted this — "why does
+Last 24h say no data?" — because monitoring had been off since
+2026-08-12 with nothing to notice or fix it. `MonitoringService.isEnabledByUser`
+(persisted user intent from issue #1's fix, default true) was
+previously only acted on by `BootReceiver`, i.e. only at device boot;
+anything else that stops the service without an explicit Stop tap (a
+reinstall force-stops the process with no reboot involved; Android
+killing it) left monitoring off until manually restarted.
+`MainActivity.onCreate()` now checks intent + actual running state on
+every open and restarts if they've drifted apart. Four bot-review
+rounds on the PR, all on code correctness/consistency in the fix
+itself (no prompting for notification permission on a silent
+auto-restart; a defensive catch around the foreground-service start,
+using `IllegalStateException` rather than the API-31-only exception
+class since this app's `minSdk` is 30; narrowing that catch to not
+also swallow the WorkManager fallback enqueue; two rounds of comment-
+accuracy chasing after the code changed) — a good illustration of the
+bot catching real drift between code and its own explanatory comments
+across incremental edits, not just logic bugs.
+
 ## Next
 
 - `myhourly:StepCounterWakeLock` investigation — issue #20, third-party
@@ -781,5 +841,7 @@ improvement:
 - Consider sending Samsung an update on the Android Auto per-hour
   churn-during-use finding (194–232 events clustered into 4–5hr
   driving windows on 08-11/08-12) — user's call on timing/wording.
-- Phase 5 (UI): timeline view aligning app sessions against thermal
-  state and battery drain. No new device access needed.
+- Timeline view's own known gaps, not blocking: `usage_events` has no
+  downsampled query variant (unbounded load at "All time" as the
+  table grows further); bands aren't pixel-column-aligned with the
+  chart's actual plot rect (axis-label insets).
