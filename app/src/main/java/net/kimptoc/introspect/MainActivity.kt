@@ -28,6 +28,7 @@ import net.kimptoc.introspect.export.CsvExporter
 import net.kimptoc.introspect.service.MonitoringService
 import net.kimptoc.introspect.service.SamplingWorker
 import net.kimptoc.introspect.shizuku.ShizukuManager
+import net.kimptoc.introspect.timeline.TimelineActivity
 import rikka.shizuku.Shizuku
 
 class MainActivity : ComponentActivity() {
@@ -106,6 +107,10 @@ class MainActivity : ComponentActivity() {
         usageAccessButton.setOnClickListener { requestUsageAccessIfNeeded() }
 
         shizukuAccessButton.setOnClickListener { requestShizukuAccessIfNeeded() }
+
+        findViewById<Button>(R.id.openTimelineButton).setOnClickListener {
+            startActivity(Intent(this, TimelineActivity::class.java))
+        }
 
         // repeatOnLifecycle rather than a one-shot refresh in onResume:
         // "is this actually collecting right now" (issue #1) needs the

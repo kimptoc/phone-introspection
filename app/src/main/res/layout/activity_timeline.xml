@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/timelineRootLayout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/range24hButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/timeline_range_24h" />
+
+        <Button
+            android:id="@+id/range3dButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/timeline_range_3d" />
+
+        <Button
+            android:id="@+id/range7dButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/timeline_range_7d" />
+
+        <Button
+            android:id="@+id/rangeAllButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/timeline_range_all" />
+
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/timelineEmptyStateText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:visibility="gone" />
+
+    <com.github.mikephil.charting.charts.LineChart
+        android:id="@+id/batteryChart"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="3"
+        android:layout_marginTop="16dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/timeline_band_thermal" />
+
+    <net.kimptoc.introspect.timeline.TimelineBandView
+        android:id="@+id/thermalBand"
+        android:layout_width="match_parent"
+        android:layout_height="24dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/timeline_band_doze" />
+
+    <net.kimptoc.introspect.timeline.TimelineBandView
+        android:id="@+id/dozeBand"
+        android:layout_width="match_parent"
+        android:layout_height="24dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/timeline_band_sessions" />
+
+    <net.kimptoc.introspect.timeline.TimelineBandView
+        android:id="@+id/sessionsBand"
+        android:layout_width="match_parent"
+        android:layout_height="24dp" />
+
+</LinearLayout>
