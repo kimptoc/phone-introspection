@@ -87,9 +87,8 @@ class MainActivity : ComponentActivity() {
             // can't resolve on this app's own floor). This now runs
             // unconditionally on every cold open, not just in response to
             // a button tap - a thrown exception here would crash the whole
-            // app on launch instead of leaving monitoring off, which the
-            // 5s status poll already reports honestly (bot review on
-            // PR #22).
+            // app on launch instead of degrading to the WorkManager
+            // fallback alone (bot review on PR #22).
             //
             // Only MonitoringService.start() is inside the try - the
             // comment above promises "leave monitoring off" on failure,
@@ -102,7 +101,14 @@ class MainActivity : ComponentActivity() {
             try {
                 MonitoringService.start(this)
             } catch (e: IllegalStateException) {
-                // Leave monitoring off; the status UI reports it honestly.
+                // Foreground start refused; the fallback worker below
+                // still samples (bot review round 3 on PR #22 - the
+                // previous comment here claimed monitoring stays off,
+                // which stopped being true the moment enqueuePeriodic()
+                // moved outside this catch: the foreground service is
+                // off, but MonitoringService.isRunning tracks only that,
+                // not the independent WorkManager fallback, which keeps
+                // inserting samples every 15 minutes regardless).
             }
             SamplingWorker.enqueuePeriodic(this)
         }
