@@ -57,6 +57,61 @@ class MainActivity : ComponentActivity() {
 
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
+        // If the user's persisted intent (MonitoringService.isEnabledByUser,
+        // default true - see issue #1) is "monitoring should be running"
+        // but it isn't actually running, start it here rather than making
+        // the user notice and re-tap Start. Previously this intent was
+        // only acted on by BootReceiver, i.e. only at device boot - a
+        // reinstall (which force-stops the service, no reboot involved)
+        // left monitoring off until manually restarted, which is exactly
+        // what happened and confused an actual user of this app. Defaults
+        // to on for a fresh install too: this app's whole purpose is
+        // continuous self-monitoring, opted into by installing it at all.
+        if (MonitoringService.isEnabledByUser(this) && !MonitoringService.isRunning) {
+            // No notification-permission prompt here, unlike the manual
+            // Start button below: a silent auto-restart on cold open is
+            // exactly the moment an unexpected system dialog is most
+            // jarring, and re-firing it on every restart until the user
+            // either grants or hits Android's own auto-deny threshold is
+            // its own annoyance (bot review on PR #22). Missing that
+            // permission only means the foreground-service notification
+            // itself won't show - monitoring still starts and runs either
+            // way. The button's explicit tap remains the place a
+            // permission prompt is an expected response to user action.
+            //
+            // Also guarded against a foreground-service start being refused
+            // outright: Android 12+ can throw
+            // ForegroundServiceStartNotAllowedException (a subclass of
+            // IllegalStateException, caught here by the parent type - the
+            // subclass itself requires API 31 and this app's minSdk is 30,
+            // so catching it by name would reference a class the verifier
+            // can't resolve on this app's own floor). This now runs
+            // unconditionally on every cold open, not just in response to
+            // a button tap - a thrown exception here would crash the whole
+            // app on launch instead of degrading to the WorkManager
+            // fallback alone (bot review on PR #22).
+            //
+            // Only MonitoringService.start() is inside the try, not
+            // enqueuePeriodic() too: sharing the catch would silently drop
+            // the 15-min fallback worker on any enqueue failure even
+            // though the foreground service started fine - a different
+            // failure entirely from the one this catch exists for (bot
+            // review round 2 on PR #22).
+            try {
+                MonitoringService.start(this)
+            } catch (e: IllegalStateException) {
+                // Foreground start refused; the fallback worker below
+                // still samples (bot review round 3 on PR #22 - the
+                // previous comment here claimed monitoring stays off,
+                // which stopped being true the moment enqueuePeriodic()
+                // moved outside this catch: the foreground service is
+                // off, but MonitoringService.isRunning tracks only that,
+                // not the independent WorkManager fallback, which keeps
+                // inserting samples every 15 minutes regardless).
+            }
+            SamplingWorker.enqueuePeriodic(this)
+        }
+
         toggleButton.setOnClickListener {
             // The intent, decided *before* start()/stop() are called, not
             // read back from MonitoringService.isRunning afterwards -
@@ -186,9 +241,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        // Skip the prompt when already granted - previously fired
+        // unconditionally on every Start tap, re-showing (or re-queuing)
+        // a system dialog for a permission already held (bot review on
+        // PR #22).
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return
         }
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun requestBatteryOptimizationExemption() {
