@@ -104,15 +104,18 @@ class TimelineActivity : ComponentActivity() {
         // were visibly wider than the data they're meant to align under.
         // Recomputed on every call rather than once: cheap reads, and the
         // inset can genuinely change between ranges if Y-axis label width
-        // changes (e.g. "100" vs a narrower value).
-        val contentLeft = batteryChart.viewPortHandler.contentLeft()
-        val contentRight = batteryChart.viewPortHandler.contentRight()
+        // changes (e.g. "100" vs a narrower value). Sent as fractions of
+        // the chart's own width, not raw pixels - see TimelineBandView's
+        // setContentInsets doc for why (bot review on PR #23).
+        val chartWidth = batteryChart.width.toFloat()
+        val contentLeftFraction = if (chartWidth > 0f) batteryChart.viewPortHandler.contentLeft() / chartWidth else 0f
+        val contentRightFraction = if (chartWidth > 0f) batteryChart.viewPortHandler.contentRight() / chartWidth else 1f
         thermalBand.setVisibleRange(startMs, endMs)
-        thermalBand.setContentInsets(contentLeft, contentRight)
+        thermalBand.setContentInsets(contentLeftFraction, contentRightFraction)
         dozeBand.setVisibleRange(startMs, endMs)
-        dozeBand.setContentInsets(contentLeft, contentRight)
+        dozeBand.setContentInsets(contentLeftFraction, contentRightFraction)
         sessionsBand.setVisibleRange(startMs, endMs)
-        sessionsBand.setContentInsets(contentLeft, contentRight)
+        sessionsBand.setContentInsets(contentLeftFraction, contentRightFraction)
     }
 
     /**

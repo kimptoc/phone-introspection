@@ -21,11 +21,15 @@ import android.view.View
  * plot area is inset on the left by the Y-axis value labels (and
  * potentially the right, if a right axis is enabled), so drawing bands
  * across this view's *entire* width made them visibly wider than the
- * data they're meant to line up under. [TimelineActivity] reads the
- * chart's real plot-area bounds via its `ViewPortHandler` and passes
- * them straight through, since both this view and the chart share the
- * same `match_parent` width within the same parent layout - no
- * coordinate transform needed, just reusing the same pixel offsets.
+ * data they're meant to line up under. Insets are fractions of the
+ * *chart's* own width (0f..1f), not raw pixels: [TimelineActivity]
+ * currently relies on this view and the chart sharing the same
+ * `match_parent` width in the same parent layout, which makes a raw
+ * pixel copy exactly correct today - but a fraction scaled by *this*
+ * view's own width in [onDraw] stays a close approximation even if that
+ * assumption ever stops holding (a margin added to one but not the
+ * other, a different container), instead of silently drifting by a
+ * fixed pixel offset with nothing to catch it (bot review on PR #23).
  */
 class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
 
@@ -34,8 +38,8 @@ class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(con
     private var segments: List<Segment> = emptyList()
     private var visibleStartMs: Long = 0L
     private var visibleEndMs: Long = 1L
-    private var contentLeft: Float = 0f
-    private var contentRight: Float = -1f // -1 means "unset, use full width"
+    private var contentLeftFraction: Float = 0f
+    private var contentRightFraction: Float? = null // null means "unset, use full width"
     private val paint = Paint()
 
     fun setSegments(newSegments: List<Segment>) {
@@ -49,9 +53,13 @@ class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(con
         invalidate()
     }
 
-    fun setContentInsets(left: Float, right: Float) {
-        contentLeft = left
-        contentRight = right
+    /** [leftFraction]/[rightFraction] are fractions (0f..1f) of the reference width, e.g. the chart's own. */
+    fun setContentInsets(leftFraction: Float, rightFraction: Float) {
+        contentLeftFraction = leftFraction.coerceIn(0f, 1f)
+        // Never below contentLeftFraction: a bad call (right < left)
+        // would otherwise flip drawWidth negative and silently erase
+        // every segment instead of failing loudly or visibly.
+        contentRightFraction = rightFraction.coerceIn(contentLeftFraction, 1f)
         invalidate()
     }
 
@@ -59,8 +67,8 @@ class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(con
         super.onDraw(canvas)
         val span = (visibleEndMs - visibleStartMs).toFloat()
         if (span <= 0f || width == 0) return
-        val drawLeft = contentLeft
-        val drawRight = if (contentRight < 0f) width.toFloat() else contentRight
+        val drawLeft = contentLeftFraction * width
+        val drawRight = (contentRightFraction ?: 1f) * width
         val drawWidth = drawRight - drawLeft
         if (drawWidth <= 0f) return
         for (segment in segments) {
