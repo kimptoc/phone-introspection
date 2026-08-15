@@ -67,9 +67,35 @@ class MainActivity : ComponentActivity() {
         // to on for a fresh install too: this app's whole purpose is
         // continuous self-monitoring, opted into by installing it at all.
         if (MonitoringService.isEnabledByUser(this) && !MonitoringService.isRunning) {
-            requestNotificationPermissionIfNeeded()
-            MonitoringService.start(this)
-            SamplingWorker.enqueuePeriodic(this)
+            // No notification-permission prompt here, unlike the manual
+            // Start button below: a silent auto-restart on cold open is
+            // exactly the moment an unexpected system dialog is most
+            // jarring, and re-firing it on every restart until the user
+            // either grants or hits Android's own auto-deny threshold is
+            // its own annoyance (bot review on PR #22). Missing that
+            // permission only means the foreground-service notification
+            // itself won't show - monitoring still starts and runs either
+            // way. The button's explicit tap remains the place a
+            // permission prompt is an expected response to user action.
+            //
+            // Also guarded against a foreground-service start being refused
+            // outright: Android 12+ can throw
+            // ForegroundServiceStartNotAllowedException (a subclass of
+            // IllegalStateException, caught here by the parent type - the
+            // subclass itself requires API 31 and this app's minSdk is 30,
+            // so catching it by name would reference a class the verifier
+            // can't resolve on this app's own floor). This now runs
+            // unconditionally on every cold open, not just in response to
+            // a button tap - a thrown exception here would crash the whole
+            // app on launch instead of leaving monitoring off, which the
+            // 5s status poll already reports honestly (bot review on
+            // PR #22).
+            try {
+                MonitoringService.start(this)
+                SamplingWorker.enqueuePeriodic(this)
+            } catch (e: IllegalStateException) {
+                // Leave monitoring off; the status UI reports it honestly.
+            }
         }
 
         toggleButton.setOnClickListener {
@@ -197,9 +223,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        // Skip the prompt when already granted - previously fired
+        // unconditionally on every Start tap, re-showing (or re-queuing)
+        // a system dialog for a permission already held (bot review on
+        // PR #22).
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            return
         }
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun requestBatteryOptimizationExemption() {
