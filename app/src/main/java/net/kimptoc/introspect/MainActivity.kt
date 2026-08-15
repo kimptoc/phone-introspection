@@ -90,12 +90,21 @@ class MainActivity : ComponentActivity() {
             // app on launch instead of leaving monitoring off, which the
             // 5s status poll already reports honestly (bot review on
             // PR #22).
+            //
+            // Only MonitoringService.start() is inside the try - the
+            // comment above promises "leave monitoring off" on failure,
+            // which is only true if enqueuePeriodic() runs unconditionally
+            // afterward rather than sharing the same catch: sharing it
+            // would silently drop the 15-min fallback worker on any
+            // enqueue failure while the service itself is actually running
+            // fine, a different failure entirely from the one this catch
+            // exists for (bot review round 2 on PR #22).
             try {
                 MonitoringService.start(this)
-                SamplingWorker.enqueuePeriodic(this)
             } catch (e: IllegalStateException) {
                 // Leave monitoring off; the status UI reports it honestly.
             }
+            SamplingWorker.enqueuePeriodic(this)
         }
 
         toggleButton.setOnClickListener {
