@@ -103,10 +103,16 @@ class TimelineActivity : ComponentActivity() {
         loadRange(TimelineRange.LAST_24H)
     }
 
-    /** [titleRes]'s trailing " ⓘ" (from the label it was tapped from) reads fine as a dialog title too - no separate title copy needed. */
+    /**
+     * [titleRes] is the same string resource as the label that was
+     * tapped, trailing " ⓘ" and all - stripped here rather than kept, since
+     * the glyph signals "tap me for help" on the label but means nothing
+     * once it's already inside the help dialog it promised (bot review on
+     * PR #26).
+     */
     private fun showHelp(titleRes: Int, messageRes: Int) {
         android.app.AlertDialog.Builder(this)
-            .setTitle(titleRes)
+            .setTitle(getString(titleRes).removeSuffix(" ⓘ"))
             .setMessage(messageRes)
             .setPositiveButton(android.R.string.ok, null)
             .show()

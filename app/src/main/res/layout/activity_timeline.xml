@@ -53,6 +53,9 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="16dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
         android:text="@string/timeline_chart_label" />
 
     <com.github.mikephil.charting.charts.LineChart
@@ -66,6 +69,9 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
         android:text="@string/timeline_band_thermal" />
 
     <net.kimptoc.introspect.timeline.TimelineBandView
@@ -78,6 +84,9 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
         android:text="@string/timeline_band_doze" />
 
     <net.kimptoc.introspect.timeline.TimelineBandView
@@ -90,6 +99,9 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
         android:text="@string/timeline_band_sessions" />
 
     <net.kimptoc.introspect.timeline.TimelineBandView
