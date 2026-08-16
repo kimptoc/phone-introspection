@@ -11,6 +11,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.github.mikephil.charting.charts.LineChart
+import com.github.mikephil.charting.components.YAxis
 import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
@@ -21,9 +22,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import net.kimptoc.introspect.R
 import net.kimptoc.introspect.collector.t1.UsageAccess
+import net.kimptoc.introspect.db.TimestampNum
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 /**
  * Phase 5 (spec §6): battery, thermal, Doze/screen-on, and app-session
@@ -55,6 +58,8 @@ class TimelineActivity : ComponentActivity() {
     private var loadedDeviceIdle: List<TimelineSegment<Boolean>> = emptyList()
     private var loadedScreenOn: List<TimelineSegment<Boolean>> = emptyList()
     private var loadedSessions: List<AppSession> = emptyList()
+    private var loadedTemperature: List<TimestampNum> = emptyList()
+    private var loadedMemory: List<TimestampNum> = emptyList()
 
     /** The [Job] of the in-flight [loadRange] call, if any - cancelled when a new one starts. */
     private var loadJob: Job? = null
@@ -94,6 +99,32 @@ class TimelineActivity : ComponentActivity() {
     }
 
     private fun xToTimestamp(x: Float): Long = rangeStartMs + (x * 1000).toLong()
+
+    /**
+     * Nearest sample to [timestampMs] within [maxDistanceMs], or null if
+     * the closest one is further away than that - a real gap (before this
+     * signal existed, or monitoring was off), not a value worth showing
+     * as "close enough". Used for [loadedTemperature]/[loadedMemory] in
+     * the marker lookup below: unlike the segment-based signals (thermal/
+     * idle/screen-on, each held from one change to the next with an
+     * explicit end), these are periodic point samples with no
+     * "held-until" semantics of their own to look up a timestamp against.
+     *
+     * [maxDistanceMs] has no default - callers must size it to the
+     * range's actual data spacing. A fixed 30-minute window (this
+     * function's original shape) covers normal gaps at raw cadence
+     * (24h/3d), but 7d/ALL_TIME load through
+     * [TimelineRepository.loadNumeric]'s SQL bucketing, where adjacent
+     * points can legitimately sit far more than 30 minutes apart once the
+     * dataset spans weeks - a fixed cutoff would silently hide real,
+     * correctly-loaded data on exactly the range where "all time" is the
+     * whole point (bot review on PR #25). [loadRange] below derives the
+     * window from [TimelineRepository.bucketMsFor] for this reason.
+     */
+    private fun nearestNum(samples: List<TimestampNum>, timestampMs: Long, maxDistanceMs: Long): Double? {
+        val nearest = samples.filter { it.valueNum != null }.minByOrNull { abs(it.timestamp - timestampMs) } ?: return null
+        return nearest.valueNum.takeIf { abs(nearest.timestamp - timestampMs) <= maxDistanceMs }
+    }
 
     private fun syncBandsToChart() {
         val startMs = xToTimestamp(batteryChart.lowestVisibleX)
@@ -148,16 +179,53 @@ class TimelineActivity : ComponentActivity() {
             val entries = battery.mapNotNull { row ->
                 row.valueNum?.let { Entry(toX(row.timestamp), it.toFloat()) }
             }
-            val dataSet = LineDataSet(entries, "").apply {
+            val batteryDataSet = LineDataSet(entries, getString(R.string.timeline_series_battery)).apply {
                 color = Color.BLUE
                 setDrawCircles(false)
                 lineWidth = 2f
+                axisDependency = YAxis.AxisDependency.LEFT
             }
-            batteryChart.data = LineData(dataSet)
-            // This chart only ever holds one series and its own description
-            // is already hidden - a legend entry for a blank label is just
-            // an empty box, not information (bot review on PR #21).
-            batteryChart.legend.isEnabled = false
+
+            // Shares the left 0-100 axis with battery (both are percentages).
+            loadedMemory = repository.loadMemoryAvailPct(startMs, endMs)
+            val memoryEntries = loadedMemory.mapNotNull { row ->
+                row.valueNum?.let { Entry(toX(row.timestamp), it.toFloat()) }
+            }
+            val memoryDataSet = LineDataSet(memoryEntries, getString(R.string.timeline_series_memory)).apply {
+                color = Color.rgb(0, 150, 80)
+                setDrawCircles(false)
+                lineWidth = 2f
+                axisDependency = YAxis.AxisDependency.LEFT
+                // The marker (TimelineMarkerView) assumes the highlighted
+                // Entry's y IS the battery reading - it always has, since
+                // this chart only ever held one series before. Disabling
+                // highlight on this dataset (and temperature's, below)
+                // keeps that assumption true now that there are three,
+                // rather than rewriting the marker to know which dataset
+                // it landed on.
+                setHighlightEnabled(false)
+            }
+
+            // Own right-axis scale (°C), separate from the two 0-100 percentages.
+            loadedTemperature = repository.loadTemperature(startMs, endMs)
+            val temperatureEntries = loadedTemperature.mapNotNull { row ->
+                row.valueNum?.let { Entry(toX(row.timestamp), it.toFloat()) }
+            }
+            val temperatureDataSet = LineDataSet(temperatureEntries, getString(R.string.timeline_series_temperature)).apply {
+                color = Color.rgb(220, 100, 40)
+                setDrawCircles(false)
+                lineWidth = 2f
+                axisDependency = YAxis.AxisDependency.RIGHT
+                setHighlightEnabled(false)
+            }
+
+            batteryChart.data = LineData(batteryDataSet, memoryDataSet, temperatureDataSet)
+            batteryChart.axisRight.isEnabled = true
+            // Three distinctly-colored series now, unlike the single
+            // blank-label one this chart used to hold (which is why the
+            // legend used to be disabled outright, per bot review on PR
+            // #21) - a legend is the only way to tell them apart.
+            batteryChart.legend.isEnabled = true
             batteryChart.xAxis.valueFormatter = object : ValueFormatter() {
                 private val format = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())
                 override fun getFormattedValue(value: Float): String =
@@ -245,11 +313,19 @@ class TimelineActivity : ComponentActivity() {
 
             syncBandsToChart()
 
+            // A tap is never more than half a bucket from the nearest
+            // loaded point, so bucketMs is a safe, self-scaling bound -
+            // 30 min stays the floor for raw-cadence ranges (24h/3d),
+            // where bucketMsFor returns null (bot review on PR #25).
+            val nearestWindowMs = maxOf(30 * 60 * 1000L, repository.bucketMsFor(startMs, endMs) ?: 0L)
+
             batteryChart.marker = TimelineMarkerView(this@TimelineActivity, startMs, range.downsample) { timestampMs ->
                 buildString {
+                    append(nearestNum(loadedTemperature, timestampMs, nearestWindowMs)?.let { "Temp: %.1f°C\n".format(it) } ?: "")
                     append(loadedThermal.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Thermal: $it\n" } ?: "")
                     append(loadedDeviceIdle.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Idle: $it\n" } ?: "")
                     append(loadedScreenOn.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Screen on: $it\n" } ?: "")
+                    append(nearestNum(loadedMemory, timestampMs, nearestWindowMs)?.let { "Mem avail: %.0f%%\n".format(it) } ?: "")
                     append(loadedSessions.firstOrNull { timestampMs in it.startMs..it.endMs }?.packageName?.let { "App: $it" } ?: "")
                 }.trimEnd()
             }

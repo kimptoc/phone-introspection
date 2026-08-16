@@ -29,4 +29,7 @@
     <string name="timeline_band_sessions">App sessions</string>
     <string name="timeline_no_data">No data in this range</string>
     <string name="timeline_grant_usage_access">Grant usage access to see app sessions</string>
+    <string name="timeline_series_battery">Battery %</string>
+    <string name="timeline_series_memory">Memory avail %</string>
+    <string name="timeline_series_temperature">Battery temp (°C)</string>
 </resources>

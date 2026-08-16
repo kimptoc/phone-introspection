@@ -45,6 +45,13 @@ class TimelineRepository(private val context: Context) {
     suspend fun loadBattery(startMs: Long, endMs: Long): List<TimestampNum> =
         loadNumeric("battery", "level_pct", startMs, endMs)
 
+    suspend fun loadTemperature(startMs: Long, endMs: Long): List<TimestampNum> =
+        loadNumeric("battery", "temperature_c", startMs, endMs)
+
+    /** Coarse system-wide memory pressure (issue #24) - see [net.kimptoc.introspect.collector.t0.MemoryCollector]. */
+    suspend fun loadMemoryAvailPct(startMs: Long, endMs: Long): List<TimestampNum> =
+        loadNumeric("memory", "avail_pct", startMs, endMs)
+
     suspend fun loadThermal(startMs: Long, endMs: Long): List<TimelineSegment<String>> =
         loadText("thermal", "status", startMs, endMs).toSegments(endMs) { it ?: "unknown" }
 
@@ -156,8 +163,14 @@ class TimelineRepository(private val context: Context) {
         }
     }
 
-    /** null means "load raw, no downsampling" - only wide ranges bucket. */
-    private fun bucketMsFor(startMs: Long, endMs: Long): Long? {
+    /**
+     * null means "load raw, no downsampling" - only wide ranges bucket.
+     * Not private: [TimelineActivity]'s marker needs this to size its
+     * nearest-sample lookup window to the range's actual data spacing
+     * (bot review on PR #25 - a fixed window was too narrow once ALL_TIME
+     * buckets grow wider than it).
+     */
+    fun bucketMsFor(startMs: Long, endMs: Long): Long? {
         val span = endMs - startMs
         // 3 days raw is already the widest un-downsampled range
         // (TimelineRange.LAST_3D); anything wider buckets.
