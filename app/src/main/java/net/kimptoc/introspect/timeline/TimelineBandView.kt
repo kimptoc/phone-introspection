@@ -55,11 +55,19 @@ class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(con
 
     /** [leftFraction]/[rightFraction] are fractions (0f..1f) of the reference width, e.g. the chart's own. */
     fun setContentInsets(leftFraction: Float, rightFraction: Float) {
+        // A coerce here would still let a right < left call through as a
+        // silently zero-width (invisible) band - no different from the
+        // silent erase this guards against, just with numbers that read
+        // back as "healthy" (bot review round 2 on PR #23). require()
+        // instead: the only caller derives both values from MPAndroidChart's
+        // own ViewPortHandler, where right >= left is a real invariant, so
+        // this should never fire outside a genuine programming error -
+        // exactly the case for failing loudly rather than swallowing it.
+        require(rightFraction >= leftFraction) {
+            "setContentInsets: rightFraction ($rightFraction) < leftFraction ($leftFraction)"
+        }
         contentLeftFraction = leftFraction.coerceIn(0f, 1f)
-        // Never below contentLeftFraction: a bad call (right < left)
-        // would otherwise flip drawWidth negative and silently erase
-        // every segment instead of failing loudly or visibly.
-        contentRightFraction = rightFraction.coerceIn(contentLeftFraction, 1f)
+        contentRightFraction = rightFraction.coerceIn(0f, 1f)
         invalidate()
     }
 
