@@ -45,6 +45,13 @@ class TimelineRepository(private val context: Context) {
     suspend fun loadBattery(startMs: Long, endMs: Long): List<TimestampNum> =
         loadNumeric("battery", "level_pct", startMs, endMs)
 
+    suspend fun loadTemperature(startMs: Long, endMs: Long): List<TimestampNum> =
+        loadNumeric("battery", "temperature_c", startMs, endMs)
+
+    /** Coarse system-wide memory pressure (issue #24) - see [net.kimptoc.introspect.collector.t0.MemoryCollector]. */
+    suspend fun loadMemoryAvailPct(startMs: Long, endMs: Long): List<TimestampNum> =
+        loadNumeric("memory", "avail_pct", startMs, endMs)
+
     suspend fun loadThermal(startMs: Long, endMs: Long): List<TimelineSegment<String>> =
         loadText("thermal", "status", startMs, endMs).toSegments(endMs) { it ?: "unknown" }
 

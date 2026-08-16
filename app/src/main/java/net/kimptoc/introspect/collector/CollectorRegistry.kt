@@ -7,6 +7,7 @@ import net.kimptoc.introspect.collector.t0.BatteryCollector
 import net.kimptoc.introspect.collector.t0.BootCollector
 import net.kimptoc.introspect.collector.t0.DozeScreenCollector
 import net.kimptoc.introspect.collector.t0.ExitReasonCollector
+import net.kimptoc.introspect.collector.t0.MemoryCollector
 import net.kimptoc.introspect.collector.t0.StorageCollector
 import net.kimptoc.introspect.collector.t0.ThermalCollector
 import net.kimptoc.introspect.collector.t1.InstalledPackagesCollector
@@ -35,6 +36,7 @@ object CollectorRegistry {
         DozeScreenCollector(),
         ExitReasonCollector(),
         StorageCollector(),
+        MemoryCollector(),
         UsageEventsCollector(),
         UsageForegroundCollector(),
         NetworkStatsCollector(),
