@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.util.AttributeSet
+import android.util.Log
 import android.view.View
 
 /**
@@ -55,19 +56,30 @@ class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(con
 
     /** [leftFraction]/[rightFraction] are fractions (0f..1f) of the reference width, e.g. the chart's own. */
     fun setContentInsets(leftFraction: Float, rightFraction: Float) {
-        // A coerce here would still let a right < left call through as a
-        // silently zero-width (invisible) band - no different from the
-        // silent erase this guards against, just with numbers that read
-        // back as "healthy" (bot review round 2 on PR #23). require()
-        // instead: the only caller derives both values from MPAndroidChart's
-        // own ViewPortHandler, where right >= left is a real invariant, so
-        // this should never fire outside a genuine programming error -
-        // exactly the case for failing loudly rather than swallowing it.
-        require(rightFraction >= leftFraction) {
-            "setContentInsets: rightFraction ($rightFraction) < leftFraction ($leftFraction)"
+        // This call is driven by syncBandsToChart() on every chart pan/zoom
+        // gesture, so a require() here (round 3's fix) turned a defensive
+        // check into a main-thread crash on whatever gesture callback
+        // happened to see MPAndroidChart's ViewPortHandler momentarily
+        // report right < left - and that ordering is an assumption about
+        // third-party internals, not a verified invariant (bot review
+        // round 4 on PR #23). Loud but survivable instead: log a warning
+        // (so the bad call still leaves a trace) and clamp to a zero-width
+        // band rather than crash the app over a drawing-sync helper.
+        if (rightFraction < leftFraction) {
+            Log.w(
+                "TimelineBandView",
+                "setContentInsets: rightFraction ($rightFraction) < leftFraction ($leftFraction); clamping to zero-width"
+            )
         }
-        contentLeftFraction = leftFraction.coerceIn(0f, 1f)
-        contentRightFraction = rightFraction.coerceIn(0f, 1f)
+        val clampedLeft = leftFraction.coerceIn(0f, 1f)
+        contentLeftFraction = clampedLeft
+        // rightFraction clamped against the already-0f..1f-clamped left, not
+        // the raw parameter - coerceIn(min, max) requires min <= max, and an
+        // out-of-range leftFraction (e.g. > 1f) would otherwise throw here
+        // instead of degrading gracefully like the rest of this method.
+        // clampedLeft is always <= 1f, so (clampedLeft, 1f) is always a
+        // valid range.
+        contentRightFraction = rightFraction.coerceIn(clampedLeft, 1f)
         invalidate()
     }
 
