@@ -63,23 +63,26 @@ class TimelineBandView(context: Context, attrs: AttributeSet? = null) : View(con
         // report right < left - and that ordering is an assumption about
         // third-party internals, not a verified invariant (bot review
         // round 4 on PR #23). Loud but survivable instead: log a warning
-        // (so the bad call still leaves a trace) and clamp to a zero-width
-        // band rather than crash the app over a drawing-sync helper.
-        if (rightFraction < leftFraction) {
+        // and clamp to a zero-width band rather than crash the app over a
+        // drawing-sync helper.
+        //
+        // The warning check runs on the *clamped* values, not the raw
+        // parameters - round 4's raw rightFraction < leftFraction check
+        // missed out-of-range inputs like (1.2f, 1.4f), which clamp to an
+        // equal (zero-width) pair without either raw value being "less
+        // than" the other, so the band still vanished with no log line
+        // (bot review round 5 on PR #23).
+        val clampedLeft = leftFraction.coerceIn(0f, 1f)
+        val clampedRight = rightFraction.coerceIn(clampedLeft, 1f)
+        if (clampedRight <= clampedLeft && rightFraction != leftFraction) {
             Log.w(
                 "TimelineBandView",
-                "setContentInsets: rightFraction ($rightFraction) < leftFraction ($leftFraction); clamping to zero-width"
+                "setContentInsets: effective right ($clampedRight) <= left ($clampedLeft) " +
+                    "from raw (leftFraction=$leftFraction, rightFraction=$rightFraction); clamping to zero-width"
             )
         }
-        val clampedLeft = leftFraction.coerceIn(0f, 1f)
         contentLeftFraction = clampedLeft
-        // rightFraction clamped against the already-0f..1f-clamped left, not
-        // the raw parameter - coerceIn(min, max) requires min <= max, and an
-        // out-of-range leftFraction (e.g. > 1f) would otherwise throw here
-        // instead of degrading gracefully like the rest of this method.
-        // clampedLeft is always <= 1f, so (clampedLeft, 1f) is always a
-        // valid range.
-        contentRightFraction = rightFraction.coerceIn(clampedLeft, 1f)
+        contentRightFraction = clampedRight
         invalidate()
     }
 
