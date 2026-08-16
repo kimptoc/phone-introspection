@@ -109,12 +109,19 @@ class TimelineActivity : ComponentActivity() {
      * idle/screen-on, each held from one change to the next with an
      * explicit end), these are periodic point samples with no
      * "held-until" semantics of their own to look up a timestamp against.
-     * 30 minutes covers normal gaps between samples at both signals'
-     * collection cadence ([net.kimptoc.introspect.collector.t0.MemoryCollector]'s
-     * 15-min gate is the sparser of the two) without showing a stale
-     * reading across an actual outage.
+     *
+     * [maxDistanceMs] has no default - callers must size it to the
+     * range's actual data spacing. A fixed 30-minute window (this
+     * function's original shape) covers normal gaps at raw cadence
+     * (24h/3d), but 7d/ALL_TIME load through
+     * [TimelineRepository.loadNumeric]'s SQL bucketing, where adjacent
+     * points can legitimately sit far more than 30 minutes apart once the
+     * dataset spans weeks - a fixed cutoff would silently hide real,
+     * correctly-loaded data on exactly the range where "all time" is the
+     * whole point (bot review on PR #25). [loadRange] below derives the
+     * window from [TimelineRepository.bucketMsFor] for this reason.
      */
-    private fun nearestNum(samples: List<TimestampNum>, timestampMs: Long, maxDistanceMs: Long = 30 * 60 * 1000L): Double? {
+    private fun nearestNum(samples: List<TimestampNum>, timestampMs: Long, maxDistanceMs: Long): Double? {
         val nearest = samples.filter { it.valueNum != null }.minByOrNull { abs(it.timestamp - timestampMs) } ?: return null
         return nearest.valueNum.takeIf { abs(nearest.timestamp - timestampMs) <= maxDistanceMs }
     }
@@ -306,13 +313,19 @@ class TimelineActivity : ComponentActivity() {
 
             syncBandsToChart()
 
+            // A tap is never more than half a bucket from the nearest
+            // loaded point, so bucketMs is a safe, self-scaling bound -
+            // 30 min stays the floor for raw-cadence ranges (24h/3d),
+            // where bucketMsFor returns null (bot review on PR #25).
+            val nearestWindowMs = maxOf(30 * 60 * 1000L, repository.bucketMsFor(startMs, endMs) ?: 0L)
+
             batteryChart.marker = TimelineMarkerView(this@TimelineActivity, startMs, range.downsample) { timestampMs ->
                 buildString {
-                    append(nearestNum(loadedTemperature, timestampMs)?.let { "Temp: %.1f°C\n".format(it) } ?: "")
+                    append(nearestNum(loadedTemperature, timestampMs, nearestWindowMs)?.let { "Temp: %.1f°C\n".format(it) } ?: "")
                     append(loadedThermal.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Thermal: $it\n" } ?: "")
                     append(loadedDeviceIdle.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Idle: $it\n" } ?: "")
                     append(loadedScreenOn.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Screen on: $it\n" } ?: "")
-                    append(nearestNum(loadedMemory, timestampMs)?.let { "Mem avail: %.0f%%\n".format(it) } ?: "")
+                    append(nearestNum(loadedMemory, timestampMs, nearestWindowMs)?.let { "Mem avail: %.0f%%\n".format(it) } ?: "")
                     append(loadedSessions.firstOrNull { timestampMs in it.startMs..it.endMs }?.packageName?.let { "App: $it" } ?: "")
                 }.trimEnd()
             }

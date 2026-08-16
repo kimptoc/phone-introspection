@@ -163,8 +163,14 @@ class TimelineRepository(private val context: Context) {
         }
     }
 
-    /** null means "load raw, no downsampling" - only wide ranges bucket. */
-    private fun bucketMsFor(startMs: Long, endMs: Long): Long? {
+    /**
+     * null means "load raw, no downsampling" - only wide ranges bucket.
+     * Not private: [TimelineActivity]'s marker needs this to size its
+     * nearest-sample lookup window to the range's actual data spacing
+     * (bot review on PR #25 - a fixed window was too narrow once ALL_TIME
+     * buckets grow wider than it).
+     */
+    fun bucketMsFor(startMs: Long, endMs: Long): Long? {
         val span = endMs - startMs
         // 3 days raw is already the widest un-downsampled range
         // (TimelineRange.LAST_3D); anything wider buckets.
