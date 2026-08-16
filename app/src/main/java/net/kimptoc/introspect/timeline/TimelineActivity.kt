@@ -95,24 +95,27 @@ class TimelineActivity : ComponentActivity() {
         findViewById<Button>(R.id.range7dButton).setOnClickListener { loadRange(TimelineRange.LAST_7D) }
         findViewById<Button>(R.id.rangeAllButton).setOnClickListener { loadRange(TimelineRange.ALL_TIME) }
 
-        findViewById<TextView>(R.id.chartLabel).setOnClickListener { showHelp(R.string.timeline_chart_label, R.string.timeline_help_chart) }
-        findViewById<TextView>(R.id.thermalLabel).setOnClickListener { showHelp(R.string.timeline_band_thermal, R.string.timeline_help_thermal) }
-        findViewById<TextView>(R.id.dozeLabel).setOnClickListener { showHelp(R.string.timeline_band_doze, R.string.timeline_help_doze) }
-        findViewById<TextView>(R.id.sessionsLabel).setOnClickListener { showHelp(R.string.timeline_band_sessions, R.string.timeline_help_sessions) }
+        findViewById<TextView>(R.id.chartLabel).setOnClickListener { showHelp(R.string.timeline_chart_title, R.string.timeline_help_chart) }
+        findViewById<TextView>(R.id.thermalLabel).setOnClickListener { showHelp(R.string.timeline_thermal_title, R.string.timeline_help_thermal) }
+        findViewById<TextView>(R.id.dozeLabel).setOnClickListener { showHelp(R.string.timeline_doze_title, R.string.timeline_help_doze) }
+        findViewById<TextView>(R.id.sessionsLabel).setOnClickListener { showHelp(R.string.timeline_sessions_title, R.string.timeline_help_sessions) }
 
         loadRange(TimelineRange.LAST_24H)
     }
 
     /**
-     * [titleRes] is the same string resource as the label that was
-     * tapped, trailing " ⓘ" and all - stripped here rather than kept, since
-     * the glyph signals "tap me for help" on the label but means nothing
-     * once it's already inside the help dialog it promised (bot review on
-     * PR #26).
+     * [titleRes] is its own dedicated string (e.g. [R.string.timeline_thermal_title]),
+     * not the label string reused with the trailing " ⓘ" stripped off -
+     * that string-match strip only held while the label copy and the
+     * stripped literal stayed byte-for-byte identical, so any future edit
+     * to the label (different spacing, a different Unicode glyph) would
+     * have silently put the ⓘ back in the dialog title with no error
+     * (bot review round 2 on PR #26). Separate resources decouple the two
+     * completely instead of relying on that coincidence.
      */
     private fun showHelp(titleRes: Int, messageRes: Int) {
         android.app.AlertDialog.Builder(this)
-            .setTitle(getString(titleRes).removeSuffix(" ⓘ"))
+            .setTitle(titleRes)
             .setMessage(messageRes)
             .setPositiveButton(android.R.string.ok, null)
             .show()
