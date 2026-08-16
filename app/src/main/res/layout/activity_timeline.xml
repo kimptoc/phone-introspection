@@ -48,17 +48,30 @@
         android:layout_marginTop="24dp"
         android:visibility="gone" />
 
+    <TextView
+        android:id="@+id/chartLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
+        android:text="@string/timeline_chart_label" />
+
     <com.github.mikephil.charting.charts.LineChart
         android:id="@+id/batteryChart"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="3"
-        android:layout_marginTop="16dp" />
+        android:layout_weight="3" />
 
     <TextView
-        android:layout_width="match_parent"
+        android:id="@+id/thermalLabel"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
         android:text="@string/timeline_band_thermal" />
 
     <net.kimptoc.introspect.timeline.TimelineBandView
@@ -67,9 +80,13 @@
         android:layout_height="24dp" />
 
     <TextView
-        android:layout_width="match_parent"
+        android:id="@+id/dozeLabel"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
         android:text="@string/timeline_band_doze" />
 
     <net.kimptoc.introspect.timeline.TimelineBandView
@@ -78,9 +95,13 @@
         android:layout_height="24dp" />
 
     <TextView
-        android:layout_width="match_parent"
+        android:id="@+id/sessionsLabel"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
         android:text="@string/timeline_band_sessions" />
 
     <net.kimptoc.introspect.timeline.TimelineBandView
