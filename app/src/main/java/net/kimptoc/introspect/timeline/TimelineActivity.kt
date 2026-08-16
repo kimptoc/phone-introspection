@@ -95,7 +95,21 @@ class TimelineActivity : ComponentActivity() {
         findViewById<Button>(R.id.range7dButton).setOnClickListener { loadRange(TimelineRange.LAST_7D) }
         findViewById<Button>(R.id.rangeAllButton).setOnClickListener { loadRange(TimelineRange.ALL_TIME) }
 
+        findViewById<TextView>(R.id.chartLabel).setOnClickListener { showHelp(R.string.timeline_chart_label, R.string.timeline_help_chart) }
+        findViewById<TextView>(R.id.thermalLabel).setOnClickListener { showHelp(R.string.timeline_band_thermal, R.string.timeline_help_thermal) }
+        findViewById<TextView>(R.id.dozeLabel).setOnClickListener { showHelp(R.string.timeline_band_doze, R.string.timeline_help_doze) }
+        findViewById<TextView>(R.id.sessionsLabel).setOnClickListener { showHelp(R.string.timeline_band_sessions, R.string.timeline_help_sessions) }
+
         loadRange(TimelineRange.LAST_24H)
+    }
+
+    /** [titleRes]'s trailing " ⓘ" (from the label it was tapped from) reads fine as a dialog title too - no separate title copy needed. */
+    private fun showHelp(titleRes: Int, messageRes: Int) {
+        android.app.AlertDialog.Builder(this)
+            .setTitle(titleRes)
+            .setMessage(messageRes)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
     }
 
     private fun xToTimestamp(x: Float): Long = rangeStartMs + (x * 1000).toLong()

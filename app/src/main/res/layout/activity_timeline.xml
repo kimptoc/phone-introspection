@@ -48,15 +48,22 @@
         android:layout_marginTop="24dp"
         android:visibility="gone" />
 
+    <TextView
+        android:id="@+id/chartLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="@string/timeline_chart_label" />
+
     <com.github.mikephil.charting.charts.LineChart
         android:id="@+id/batteryChart"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="3"
-        android:layout_marginTop="16dp" />
+        android:layout_weight="3" />
 
     <TextView
-        android:layout_width="match_parent"
+        android:id="@+id/thermalLabel"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:text="@string/timeline_band_thermal" />
@@ -67,7 +74,8 @@
         android:layout_height="24dp" />
 
     <TextView
-        android:layout_width="match_parent"
+        android:id="@+id/dozeLabel"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:text="@string/timeline_band_doze" />
@@ -78,7 +86,8 @@
         android:layout_height="24dp" />
 
     <TextView
-        android:layout_width="match_parent"
+        android:id="@+id/sessionsLabel"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:text="@string/timeline_band_sessions" />

@@ -24,12 +24,17 @@
     <string name="timeline_range_all">All time</string>
     <string name="open_timeline">Open timeline</string>
     <string name="timeline_title">Timeline</string>
-    <string name="timeline_band_thermal">Thermal state</string>
-    <string name="timeline_band_doze">Doze / screen on</string>
-    <string name="timeline_band_sessions">App sessions</string>
+    <string name="timeline_band_thermal">Thermal state ⓘ</string>
+    <string name="timeline_band_doze">Doze / screen on ⓘ</string>
+    <string name="timeline_band_sessions">App sessions ⓘ</string>
     <string name="timeline_no_data">No data in this range</string>
     <string name="timeline_grant_usage_access">Grant usage access to see app sessions</string>
     <string name="timeline_series_battery">Battery %</string>
     <string name="timeline_series_memory">Memory avail %</string>
     <string name="timeline_series_temperature">Battery temp (°C)</string>
+    <string name="timeline_chart_label">Battery, memory &amp; temperature ⓘ</string>
+    <string name="timeline_help_chart">Battery % (left axis, blue) and memory available % (left axis, green) share the same 0–100 scale since both are percentages. Battery temperature (right axis, orange) is in °C. Pinch to zoom, drag to pan - the bands below stay in sync. Tap directly on the battery line for exact values at that point.</string>
+    <string name="timeline_help_thermal">Android\'s thermal throttling status over time. Green = normal. Yellow/orange = light-to-moderate throttling. Red = severe or worse, meaning the OS is actively slowing the device down to cool it. Grey = unknown.</string>
+    <string name="timeline_help_doze">Yellow = screen on. Light blue = Doze (deep idle, most background work paused). Grey = screen off but not yet dozing. Screen-on is drawn on top of the Doze color, so a yellow stretch always means the screen was actually on.</string>
+    <string name="timeline_help_sessions">Each color block is one app in the foreground; width is how long it stayed there. Colors are assigned in the order apps first appear in this range, not by app identity - the same app can get a different color in a different range.</string>
 </resources>
