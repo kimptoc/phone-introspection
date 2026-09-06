@@ -52,6 +52,10 @@ class TimelineRepository(private val context: Context) {
     suspend fun loadMemoryAvailPct(startMs: Long, endMs: Long): List<TimestampNum> =
         loadNumeric("memory", "avail_pct", startMs, endMs)
 
+    /** System-wide running-process count (issue #27) - see [net.kimptoc.introspect.collector.t3.ProcessCountCollector]. */
+    suspend fun loadProcessCount(startMs: Long, endMs: Long): List<TimestampNum> =
+        loadNumeric("process_count", "process_count", startMs, endMs)
+
     suspend fun loadThermal(startMs: Long, endMs: Long): List<TimelineSegment<String>> =
         loadText("thermal", "status", startMs, endMs).toSegments(endMs) { it ?: "unknown" }
 

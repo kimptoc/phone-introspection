@@ -42,10 +42,12 @@ class TimelineActivity : ComponentActivity() {
 
     private lateinit var repository: TimelineRepository
     private lateinit var batteryChart: LineChart
+    private lateinit var processChart: LineChart
     private lateinit var emptyStateText: TextView
     private lateinit var thermalBand: TimelineBandView
     private lateinit var dozeBand: TimelineBandView
     private lateinit var sessionsBand: TimelineBandView
+    private lateinit var processesLabel: TextView
 
     // Only read by syncBandsToChart/xToTimestamp (gesture/marker-sync code
     // that legitimately needs "what range is currently on screen") and
@@ -60,6 +62,7 @@ class TimelineActivity : ComponentActivity() {
     private var loadedSessions: List<AppSession> = emptyList()
     private var loadedTemperature: List<TimestampNum> = emptyList()
     private var loadedMemory: List<TimestampNum> = emptyList()
+    private var loadedProcessCount: List<TimestampNum> = emptyList()
 
     /** The [Job] of the in-flight [loadRange] call, if any - cancelled when a new one starts. */
     private var loadJob: Job? = null
@@ -74,19 +77,30 @@ class TimelineActivity : ComponentActivity() {
         applySystemBarInsetsAsPadding(findViewById(R.id.timelineRootLayout))
         repository = TimelineRepository(this)
         batteryChart = findViewById(R.id.batteryChart)
+        processChart = findViewById(R.id.processChart)
         emptyStateText = findViewById(R.id.timelineEmptyStateText)
         thermalBand = findViewById(R.id.thermalBand)
         dozeBand = findViewById(R.id.dozeBand)
         sessionsBand = findViewById(R.id.sessionsBand)
+        processesLabel = findViewById(R.id.processesLabel)
         batteryChart.onChartGestureListener = object : OnChartGestureListener {
             override fun onChartGestureStart(me: MotionEvent?, lastGesture: ChartTouchListener.ChartGesture?) {}
-            override fun onChartGestureEnd(me: MotionEvent?, lastGesture: ChartTouchListener.ChartGesture?) = syncBandsToChart()
+            override fun onChartGestureEnd(me: MotionEvent?, lastGesture: ChartTouchListener.ChartGesture?) {
+                syncBandsToChart()
+                syncProcessChartToBattery()
+            }
             override fun onChartLongPressed(me: MotionEvent?) {}
             override fun onChartDoubleTapped(me: MotionEvent?) {}
             override fun onChartSingleTapped(me: MotionEvent?) {}
             override fun onChartFling(me1: MotionEvent?, me2: MotionEvent?, velocityX: Float, velocityY: Float) {}
-            override fun onChartScale(me: MotionEvent?, scaleX: Float, scaleY: Float) = syncBandsToChart()
-            override fun onChartTranslate(me: MotionEvent?, dX: Float, dY: Float) = syncBandsToChart()
+            override fun onChartScale(me: MotionEvent?, scaleX: Float, scaleY: Float) {
+                syncBandsToChart()
+                syncProcessChartToBattery()
+            }
+            override fun onChartTranslate(me: MotionEvent?, dX: Float, dY: Float) {
+                syncBandsToChart()
+                syncProcessChartToBattery()
+            }
         }
         batteryChart.description.isEnabled = false
 
@@ -96,6 +110,7 @@ class TimelineActivity : ComponentActivity() {
         findViewById<Button>(R.id.rangeAllButton).setOnClickListener { loadRange(TimelineRange.ALL_TIME) }
 
         findViewById<TextView>(R.id.chartLabel).setOnClickListener { showHelp(R.string.timeline_chart_title, R.string.timeline_help_chart) }
+        processesLabel.setOnClickListener { showHelp(R.string.timeline_processes_title, R.string.timeline_help_processes) }
         findViewById<TextView>(R.id.thermalLabel).setOnClickListener { showHelp(R.string.timeline_thermal_title, R.string.timeline_help_thermal) }
         findViewById<TextView>(R.id.dozeLabel).setOnClickListener { showHelp(R.string.timeline_doze_title, R.string.timeline_help_doze) }
         findViewById<TextView>(R.id.sessionsLabel).setOnClickListener { showHelp(R.string.timeline_sessions_title, R.string.timeline_help_sessions) }
@@ -127,8 +142,9 @@ class TimelineActivity : ComponentActivity() {
      * Nearest sample to [timestampMs] within [maxDistanceMs], or null if
      * the closest one is further away than that - a real gap (before this
      * signal existed, or monitoring was off), not a value worth showing
-     * as "close enough". Used for [loadedTemperature]/[loadedMemory] in
-     * the marker lookup below: unlike the segment-based signals (thermal/
+     * as "close enough". Used for [loadedTemperature]/[loadedMemory]/
+     * [loadedProcessCount] in the marker lookup below: unlike the
+     * segment-based signals (thermal/
      * idle/screen-on, each held from one change to the next with an
      * explicit end), these are periodic point samples with no
      * "held-until" semantics of their own to look up a timestamp against.
@@ -173,12 +189,37 @@ class TimelineActivity : ComponentActivity() {
     }
 
     /**
-     * Loads and renders one range. Each signal (battery, thermal, Doze/
-     * screen-on, sessions) is loaded and rendered independently - there is
-     * no shared early-return on any one signal being empty, because an
-     * empty battery table doesn't imply an empty thermal/Doze/sessions
-     * table (and vice versa). The "No data in this range" text only shows
-     * when ALL of them come back empty.
+     * Keeps [processChart] showing exactly the time window the battery
+     * chart shows, in value space (no pixel math, unlike the bands' inset
+     * hand-off): force this chart's visible span to the battery chart's
+     * span, then align its left edge to the battery chart's left edge.
+     * Both charts share the same X domain (seconds since the range's
+     * start), so matching visible-X ranges means the same timestamps sit
+     * above each other. Called from the same gesture hooks as
+     * [syncBandsToChart], plus once per [loadRange].
+     *
+     * The `span <= 1f` guard skips a battery chart with no data (its
+     * degenerate ~1-second default axis range) - nothing to mirror then,
+     * and forcing a 1-second window onto this chart would hide its own
+     * data. No-op while this chart is hidden (no process_count samples in
+     * the loaded range).
+     */
+    private fun syncProcessChartToBattery() {
+        if (!processChart.isShown) return
+        val span = batteryChart.highestVisibleX - batteryChart.lowestVisibleX
+        if (span <= 1f) return
+        processChart.setVisibleXRange(span, span)
+        processChart.moveViewToX(batteryChart.lowestVisibleX)
+    }
+
+    /**
+     * Loads and renders one range. Each signal (battery, memory,
+     * temperature, process count, thermal, Doze/screen-on, sessions) is
+     * loaded and rendered independently - there is no shared early-return
+     * on any one signal being empty, because an empty battery table
+     * doesn't imply an empty thermal/Doze/sessions table (and vice versa).
+     * The "No data in this range" text only shows when ALL of them come
+     * back empty.
      *
      * Uses `startMs`/`endMs` locals (from [TimelineRepository.resolveRange],
      * itself `suspend`) for every X-axis conversion done as part of THIS
@@ -249,11 +290,16 @@ class TimelineActivity : ComponentActivity() {
             // legend used to be disabled outright, per bot review on PR
             // #21) - a legend is the only way to tell them apart.
             batteryChart.legend.isEnabled = true
-            batteryChart.xAxis.valueFormatter = object : ValueFormatter() {
+            // Shared with processChart below: both charts cover the same
+            // (startMs, endMs) window on the same X domain, so their time
+            // labels are identical by construction - one formatter keeps
+            // them that way instead of two copies drifting apart.
+            val xValueFormatter = object : ValueFormatter() {
                 private val format = SimpleDateFormat("MMM d HH:mm", Locale.getDefault())
                 override fun getFormattedValue(value: Float): String =
                     format.format(Date(startMs + (value * 1000).toLong()))
             }
+            batteryChart.xAxis.valueFormatter = xValueFormatter
             // Cap the number of X-axis labels drawn: "MMM d HH:mm" is ~13
             // chars, and MPAndroidChart's default label count crowds and
             // overlaps that many of them across the chart width. 4 slots
@@ -261,6 +307,44 @@ class TimelineActivity : ComponentActivity() {
             batteryChart.xAxis.setLabelCount(4, false)
             batteryChart.notifyDataSetChanged()
             batteryChart.invalidate()
+
+            // Own chart rather than a fourth series on the battery chart:
+            // the count (~300-1,100) would flatten temperature's ~20-45°C
+            // right-axis range into a smear if they shared an axis, and
+            // MPAndroidChart only has two Y-axes - both already taken
+            // (0-100% left, °C right). Touch is disabled so the battery
+            // chart stays the single pan/zoom driver and this chart just
+            // follows it (syncProcessChartToBattery), the same one-way
+            // relationship the bands below already have.
+            loadedProcessCount = repository.loadProcessCount(startMs, endMs)
+            val processEntries = loadedProcessCount.mapNotNull { row ->
+                row.valueNum?.let { Entry(toX(row.timestamp), it.toFloat()) }
+            }
+            val processDataSet = LineDataSet(processEntries, getString(R.string.timeline_series_processes)).apply {
+                color = Color.rgb(140, 90, 210)
+                setDrawCircles(false)
+                lineWidth = 2f
+                axisDependency = YAxis.AxisDependency.LEFT
+            }
+            processChart.data = LineData(processDataSet)
+            processChart.description.isEnabled = false
+            // Single series - the section label above already names it, so a
+            // legend would only cost vertical space (the battery chart's
+            // legend exists because IT has three series to tell apart).
+            processChart.legend.isEnabled = false
+            processChart.axisRight.isEnabled = false
+            processChart.setTouchEnabled(false)
+            processChart.xAxis.valueFormatter = xValueFormatter
+            processChart.xAxis.setLabelCount(4, false)
+            processChart.notifyDataSetChanged()
+            processChart.invalidate()
+            // Hidden entirely when there's no data (e.g. Shizuku never
+            // granted) rather than showing an empty chart with axes: the
+            // common no-Shizuku case shouldn't carry a permanent blank
+            // section on this screen.
+            val processesVisible = loadedProcessCount.isNotEmpty()
+            processesLabel.visibility = if (processesVisible) View.VISIBLE else View.GONE
+            processChart.visibility = if (processesVisible) View.VISIBLE else View.GONE
 
             val thermalColors = mapOf(
                 "none" to Color.rgb(200, 230, 200),
@@ -320,7 +404,8 @@ class TimelineActivity : ComponentActivity() {
 
             emptyStateText.visibility = if (
                 battery.isEmpty() && loadedThermal.isEmpty() && loadedDeviceIdle.isEmpty() &&
-                loadedScreenOn.isEmpty() && loadedSessions.isEmpty()
+                loadedScreenOn.isEmpty() && loadedSessions.isEmpty() && loadedProcessCount.isEmpty() &&
+                loadedMemory.isEmpty() && loadedTemperature.isEmpty()
             ) {
                 emptyStateText.text = getString(R.string.timeline_no_data)
                 android.view.View.VISIBLE
@@ -335,6 +420,7 @@ class TimelineActivity : ComponentActivity() {
             rangeStartMs = startMs
 
             syncBandsToChart()
+            syncProcessChartToBattery()
 
             // A tap is never more than half a bucket from the nearest
             // loaded point, so bucketMs is a safe, self-scaling bound -
@@ -349,6 +435,7 @@ class TimelineActivity : ComponentActivity() {
                     append(loadedDeviceIdle.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Idle: $it\n" } ?: "")
                     append(loadedScreenOn.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Screen on: $it\n" } ?: "")
                     append(nearestNum(loadedMemory, timestampMs, nearestWindowMs)?.let { "Mem avail: %.0f%%\n".format(it) } ?: "")
+                    append(nearestNum(loadedProcessCount, timestampMs, nearestWindowMs)?.let { "Processes: %.0f\n".format(it) } ?: "")
                     append(loadedSessions.firstOrNull { timestampMs in it.startMs..it.endMs }?.packageName?.let { "App: $it" } ?: "")
                 }.trimEnd()
             }

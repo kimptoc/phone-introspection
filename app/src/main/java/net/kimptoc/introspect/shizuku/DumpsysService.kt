@@ -120,4 +120,63 @@ class DumpsysService : IDumpsysService.Stub() {
             process.destroyForcibly()
         }
     }
+
+    /**
+     * Counts every process visible to this service's shell UID via `ps -A`
+     * (spec §3 T3's "Real process list" row, shipped as a count rather than
+     * the raw listing - see IDumpsysService.aidl for why). From the app's
+     * own UID, `/proc` is hidepid-restricted to its own processes, so this
+     * can only happen here - the same reason `dumpsys` goes through this
+     * service rather than the app process.
+     *
+     * Returns the count as a decimal string, or `"ERROR ..."` with the same
+     * contract as [dumpsys] (the caller's `startsWith("ERROR")` check).
+     */
+    override fun processCount(timeoutMs: Int): String {
+        val process = ProcessBuilder("ps", "-A").redirectErrorStream(true).start()
+        try {
+            // ps output is only ~100KB here, but an undrained stdout pipe
+            // fills at 64KB and blocks the child mid-write - which would
+            // otherwise surface as a spurious "ERROR timeout" with no hint
+            // the real cause was our own missing drain. Same class of bug
+            // dumpsys() above already guards against, so: drain thread, count
+            // in place, never accumulate the text.
+            var lines = 0
+            var readerFailed: String? = null
+            val readerThread = Thread {
+                try {
+                    process.inputStream.bufferedReader().forEachLine { lines++ }
+                } catch (e: Exception) {
+                    // Same reasoning as dumpsys()'s reader: an uncaught
+                    // exception here could take down the whole daemon process.
+                    readerFailed = e.javaClass.simpleName
+                }
+            }
+            readerThread.start()
+
+            val finished = process.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            if (!finished) {
+                process.destroyForcibly()
+            }
+            // Terminal state either way -> stdout closes -> reader reaches
+            // EOF promptly; join() is what makes the count write visible
+            // here (same bounded-join pattern as dumpsys()).
+            readerThread.join(2000)
+            if (readerThread.isAlive) return "ERROR reader_stuck"
+
+            if (!finished) return "ERROR timeout"
+            readerFailed?.let { return "ERROR $it" }
+            if (process.exitValue() != 0) return "ERROR exit=${process.exitValue()}"
+
+            // First line of `ps -A` is the column header (USER PID PPID ...).
+            // Includes kernel threads - that's what a system-wide count means
+            // here, and it's what `ps -A` has always reported, so the series
+            // stays comparable across Android versions.
+            return (lines - 1).coerceAtLeast(0).toString()
+        } catch (e: Exception) {
+            return "ERROR ${e.javaClass.simpleName}"
+        } finally {
+            process.destroyForcibly()
+        }
+    }
 }

@@ -65,6 +65,24 @@
         android:layout_weight="3" />
 
     <TextView
+        android:id="@+id/processesLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:minWidth="48dp"
+        android:minHeight="48dp"
+        android:gravity="center_vertical"
+        android:visibility="gone"
+        android:text="@string/timeline_processes_label" />
+
+    <com.github.mikephil.charting.charts.LineChart
+        android:id="@+id/processChart"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1.5"
+        android:visibility="gone" />
+
+    <TextView
         android:id="@+id/thermalLabel"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
