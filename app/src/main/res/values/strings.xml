@@ -32,6 +32,10 @@
     <string name="timeline_series_battery">Battery %</string>
     <string name="timeline_series_memory">Memory avail %</string>
     <string name="timeline_series_temperature">Battery temp (°C)</string>
+    <string name="timeline_series_processes">Processes</string>
+    <string name="timeline_processes_label">Processes ⓘ</string>
+    <string name="timeline_processes_title">Processes</string>
+    <string name="timeline_help_processes">Total running processes on the system over time, sampled every 15 minutes via Shizuku (`ps -A`, which includes kernel threads). Requires Shizuku access - see the Grant Shizuku access button on the main screen; without it this section stays hidden. The battery chart\'s marker also shows the nearest process count.</string>
     <string name="timeline_chart_label">Battery, memory &amp; temperature ⓘ</string>
     <string name="timeline_help_chart">Battery % (left axis, blue) and memory available % (left axis, green) share the same 0–100 scale since both are percentages. Battery temperature (right axis, orange) is in °C. Pinch to zoom, drag to pan - the bands below stay in sync. Tap directly on the battery line for exact values at that point.</string>
     <string name="timeline_help_thermal">Android\'s thermal throttling status over time. Green = normal. Yellow/orange = light-to-moderate throttling. Red = severe or worse, meaning the OS is actively slowing the device down to cool it. Grey = unknown.</string>

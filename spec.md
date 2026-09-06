@@ -109,7 +109,7 @@ Gives us shell-level `dumpsys`:
 | `dumpsys sensorservice` | Registered sensor clients, batching/FIFO state, sampling rates |
 | `dumpsys deviceidle` | Doze state machine, whitelist, step transitions |
 | `dumpsys power` | Wakelock holders |
-| `ps -A` | Real process list |
+| `ps -A` | Real process list (shipped as a process-count sample; the raw listing is not stored — ~10MB/day at collection cadence) |
 
 Output is unstructured text and changes between Android versions. **Wrap every parser in try/catch, store the raw text alongside the parsed result**, and treat a parse failure as a missing sample rather than an error.
 
