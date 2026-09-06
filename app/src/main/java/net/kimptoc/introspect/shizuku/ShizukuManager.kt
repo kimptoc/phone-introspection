@@ -27,7 +27,13 @@ import rikka.shizuku.Shizuku
  */
 object ShizukuManager {
     private const val PACKAGE_NAME = "net.kimptoc.introspect"
-    private const val userServiceVersion = 6
+
+    // 7: added IDumpsysService.processCount() (issue #27). A daemon UserService
+    // already running under version 6 is the old class with no such method, so
+    // the bump is what forces Shizuku to restart it - without it the app would
+    // keep calling a stale process where the new transaction code fails at
+    // call time.
+    private const val userServiceVersion = 7
 
     @Volatile private var binder: IDumpsysService? = null
     @Volatile private var binding = false
@@ -112,6 +118,31 @@ object ShizukuManager {
             val truncatedFlag = BooleanArray(1)
             val text = current.dumpsys(service, args, timeoutMs, maxChars, truncatedFlag)
             if (text.startsWith("ERROR")) DumpsysResult.Error(text) else DumpsysResult.Success(text, truncatedFlag[0])
+        } catch (e: Exception) {
+            binder = null
+            DumpsysResult.Error(e.javaClass.simpleName)
+        }
+    }
+
+    /**
+     * System-wide process count (issue #27), from [DumpsysService.processCount].
+     * Same bind lifecycle and error contract as [dumpsys]: [DumpsysResult.Success]'s
+     * text carries the count as a decimal string (truncated is always false -
+     * nothing is truncated here, the type is reused for the shared
+     * NotPermitted/NotBoundYet/Error handling, not for that flag).
+     */
+    fun processCount(timeoutMs: Int = 5000): DumpsysResult {
+        if (!isPermissionGranted()) return DumpsysResult.NotPermitted
+
+        val current = binder
+        if (current == null) {
+            ensureBinding()
+            return DumpsysResult.NotBoundYet
+        }
+
+        return try {
+            val text = current.processCount(timeoutMs)
+            if (text.startsWith("ERROR")) DumpsysResult.Error(text) else DumpsysResult.Success(text, truncated = false)
         } catch (e: Exception) {
             binder = null
             DumpsysResult.Error(e.javaClass.simpleName)
