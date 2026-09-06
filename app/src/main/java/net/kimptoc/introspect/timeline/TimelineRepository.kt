@@ -92,14 +92,21 @@ class TimelineRepository(private val context: Context) {
      * the whole window (issue #30: an app uninstalled days ago is seeded
      * open, gets no in-range events, and was previously rendered as a fake
      * 24h-long session). Any in-range event for that package clears the
-     * seed and restores normal endMs-cap behaviour - but only for the
-     * span from that event onwards: the seeded [startMs] start itself is
-     * never drawn, on any path. An app killed while foregrounded days ago
-     * and relaunched mid-range would otherwise have its first in-range
-     * resume close the seed and emit a block running from [startMs] to
-     * that relaunch, which is the same phantom the tail guard drops -
-     * and the likelier case, since being seeded open at all implies the
-     * process died rather than backgrounded cleanly.
+     * seed and restores normal endMs-cap behaviour - but *which* event
+     * arrives first decides whether the seeded [startMs] span is drawn:
+     *
+     *  - An in-range **resume** supersedes the seed: it says the app came
+     *    to the foreground at that moment, and says nothing about the
+     *    interval before it. Drawing [startMs] to that resume would be the
+     *    same phantom the tail guard drops (an app killed while
+     *    foregrounded days ago, then relaunched mid-range), so the seeded
+     *    span is discarded and the new session starts at the resume.
+     *  - An in-range **pause/stop** corroborates it: those only fire for an
+     *    activity that really was resumed, and any earlier in-range resume
+     *    would already have cleared the seed - so the app was genuinely
+     *    foregrounded across [startMs] and the span is real. Verified
+     *    on-device: `com.android.dreams.basic` (the screensaver) does this
+     *    nightly, resuming before midnight and pausing hours later.
      *
      * A resume that arrives while one is already open for that package
      * (no intervening pause/stop - e.g. the process died) closes the prior
@@ -142,12 +149,11 @@ class TimelineRepository(private val context: Context) {
 
         val sessions = mutableListOf<AppSession>()
         for (event in events) {
-            // Consumed, not just cleared: the emitters below have to know
-            // whether the openStarts entry they're closing is a real
-            // in-range resume or the startMs seed. Clearing the flag before
-            // the `when` would let a seeded start be *drawn* by the first
-            // in-range event instead of by the tail - the same phantom, on
-            // the likelier path (see the KDoc above).
+            // Consumed, not just cleared: the resume branch has to know
+            // whether the openStarts entry it's closing is a real in-range
+            // resume or the startMs seed. Only that branch drops the seeded
+            // span - a close corroborates the seed rather than superseding
+            // it (see both branches below).
             val wasSeeded = seededOpen.remove(event.key)
             when (event.valueText) {
                 "activity_resumed" -> {
@@ -161,10 +167,16 @@ class TimelineRepository(private val context: Context) {
                 "activity_paused", "activity_stopped" -> {
                     val start = openStarts.remove(event.key)
                     if (start != null) {
-                        // A seeded start closed by this event would span from
-                        // startMs to here on no evidence at all; the close is
-                        // still real, so the state below is updated either way.
-                        if (!wasSeeded) sessions += AppSession(event.key, start, event.timestamp)
+                        // A seeded start closed here is corroborated, not
+                        // phantom, so it IS drawn: pause/stop only fires for an
+                        // activity that was really resumed, and any in-range
+                        // resume would already have cleared the seed - so this
+                        // package was genuinely foregrounded across startMs and
+                        // up to this event. Verified on-device: the nightly
+                        // com.android.dreams.basic screensaver is exactly this
+                        // shape (resumed ~23:50, paused ~06:50, nothing in
+                        // between), and dropping it erased a real 7h session.
+                        sessions += AppSession(event.key, start, event.timestamp)
                     } else if (lastKnownOpen[event.key] != false) {
                         sessions += AppSession(event.key, startMs, event.timestamp)
                     }
