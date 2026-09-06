@@ -84,6 +84,16 @@ class TimelineRepository(private val context: Context) {
      * when [SampleDao.lastTimestamp] is at or past [startMs], for the same
      * reason as the endMs cap.
      *
+     * A seed only represents "was open at some point *before* the range" -
+     * it is no evidence that the app stayed foregrounded through any of the
+     * range itself. So a package seeded as open and then observed with no
+     * in-range events at all (tracked in [seededOpen]) is dropped from the
+     * dangling-open tail rather than drawn as a full-width block covering
+     * the whole window (issue #30: an app uninstalled days ago is seeded
+     * open, gets no in-range events, and was previously rendered as a fake
+     * 24h-long session). Any in-range event for that package clears the
+     * seed and restores normal endMs-cap behaviour.
+     *
      * A resume that arrives while one is already open for that package
      * (no intervening pause/stop - e.g. the process died) closes the prior
      * session at that point rather than merging both episodes into one
@@ -110,17 +120,22 @@ class TimelineRepository(private val context: Context) {
         val lastEvidenceMs = dao.lastTimestamp()
         val openStarts = mutableMapOf<String, Long>()
         val lastKnownOpen = mutableMapOf<String, Boolean>()
+        val seededOpen = mutableSetOf<String>()
 
         if (lastEvidenceMs != null && lastEvidenceMs >= startMs) {
             dao.lastUsageEventBeforeRange(startMs).forEach { row ->
                 val isOpen = row.valueText == "activity_resumed"
                 lastKnownOpen[row.key] = isOpen
-                if (isOpen) openStarts[row.key] = startMs
+                if (isOpen) {
+                    openStarts[row.key] = startMs
+                    seededOpen += row.key
+                }
             }
         }
 
         val sessions = mutableListOf<AppSession>()
         for (event in events) {
+            seededOpen.remove(event.key)
             when (event.valueText) {
                 "activity_resumed" -> {
                     val alreadyOpen = openStarts[event.key]
@@ -141,7 +156,10 @@ class TimelineRepository(private val context: Context) {
         }
 
         val cappedEnd = (lastEvidenceMs ?: endMs).coerceIn(startMs, endMs)
-        openStarts.forEach { (pkg, start) -> sessions += AppSession(pkg, start, cappedEnd.coerceAtLeast(start)) }
+        openStarts.forEach { (pkg, start) ->
+            if (pkg in seededOpen) return@forEach
+            sessions += AppSession(pkg, start, cappedEnd.coerceAtLeast(start))
+        }
         return sessions.sortedBy { it.startMs }
     }
 
