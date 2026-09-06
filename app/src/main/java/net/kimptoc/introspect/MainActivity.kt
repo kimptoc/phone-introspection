@@ -1,6 +1,7 @@
 package net.kimptoc.introspect
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -54,6 +55,7 @@ class MainActivity : ComponentActivity() {
         val exportButton = findViewById<Button>(R.id.exportButton)
         val usageAccessButton = findViewById<Button>(R.id.usageAccessButton)
         val shizukuAccessButton = findViewById<Button>(R.id.shizukuAccessButton)
+        val openShizukuButton = findViewById<Button>(R.id.openShizukuButton)
 
         Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
@@ -162,6 +164,8 @@ class MainActivity : ComponentActivity() {
         usageAccessButton.setOnClickListener { requestUsageAccessIfNeeded() }
 
         shizukuAccessButton.setOnClickListener { requestShizukuAccessIfNeeded() }
+
+        openShizukuButton.setOnClickListener { openShizuku() }
 
         findViewById<Button>(R.id.openTimelineButton).setOnClickListener {
             startActivity(Intent(this, TimelineActivity::class.java))
@@ -278,6 +282,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Opens the Shizuku manager app itself. Granting T3 access is a
+     * two-app dance - Shizuku's service has to be started from inside
+     * Shizuku (after every reboot, on a non-rooted device) before
+     * [requestShizukuAccessIfNeeded]'s permission dialog can appear at
+     * all - so the "Shizuku isn't running" case previously left the user
+     * to go find that app themselves.
+     */
+    private fun openShizuku() {
+        val intent = packageManager.getLaunchIntentForPackage(SHIZUKU_PACKAGE)
+        if (intent == null) {
+            Toast.makeText(this, "Shizuku isn't installed", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, "Couldn't open Shizuku", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun exportTo(uri: Uri) {
         lifecycleScope.launch {
             CsvExporter.export(this@MainActivity, uri)
@@ -305,6 +330,7 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val SHIZUKU_REQUEST_CODE = 1001
+        const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
         const val STATUS_REFRESH_INTERVAL_MS = 5000L
 
         // Short, one-line-per-tier context for the bare T0-T4 codes
