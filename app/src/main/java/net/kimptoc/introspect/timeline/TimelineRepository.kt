@@ -92,7 +92,14 @@ class TimelineRepository(private val context: Context) {
      * the whole window (issue #30: an app uninstalled days ago is seeded
      * open, gets no in-range events, and was previously rendered as a fake
      * 24h-long session). Any in-range event for that package clears the
-     * seed and restores normal endMs-cap behaviour.
+     * seed and restores normal endMs-cap behaviour - but only for the
+     * span from that event onwards: the seeded [startMs] start itself is
+     * never drawn, on any path. An app killed while foregrounded days ago
+     * and relaunched mid-range would otherwise have its first in-range
+     * resume close the seed and emit a block running from [startMs] to
+     * that relaunch, which is the same phantom the tail guard drops -
+     * and the likelier case, since being seeded open at all implies the
+     * process died rather than backgrounded cleanly.
      *
      * A resume that arrives while one is already open for that package
      * (no intervening pause/stop - e.g. the process died) closes the prior
@@ -135,18 +142,29 @@ class TimelineRepository(private val context: Context) {
 
         val sessions = mutableListOf<AppSession>()
         for (event in events) {
-            seededOpen.remove(event.key)
+            // Consumed, not just cleared: the emitters below have to know
+            // whether the openStarts entry they're closing is a real
+            // in-range resume or the startMs seed. Clearing the flag before
+            // the `when` would let a seeded start be *drawn* by the first
+            // in-range event instead of by the tail - the same phantom, on
+            // the likelier path (see the KDoc above).
+            val wasSeeded = seededOpen.remove(event.key)
             when (event.valueText) {
                 "activity_resumed" -> {
                     val alreadyOpen = openStarts[event.key]
-                    if (alreadyOpen != null) sessions += AppSession(event.key, alreadyOpen, event.timestamp)
+                    if (alreadyOpen != null && !wasSeeded) {
+                        sessions += AppSession(event.key, alreadyOpen, event.timestamp)
+                    }
                     openStarts[event.key] = event.timestamp
                     lastKnownOpen[event.key] = true
                 }
                 "activity_paused", "activity_stopped" -> {
                     val start = openStarts.remove(event.key)
                     if (start != null) {
-                        sessions += AppSession(event.key, start, event.timestamp)
+                        // A seeded start closed by this event would span from
+                        // startMs to here on no evidence at all; the close is
+                        // still real, so the state below is updated either way.
+                        if (!wasSeeded) sessions += AppSession(event.key, start, event.timestamp)
                     } else if (lastKnownOpen[event.key] != false) {
                         sessions += AppSession(event.key, startMs, event.timestamp)
                     }
