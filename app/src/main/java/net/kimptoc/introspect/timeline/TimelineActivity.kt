@@ -404,7 +404,8 @@ class TimelineActivity : ComponentActivity() {
 
             emptyStateText.visibility = if (
                 battery.isEmpty() && loadedThermal.isEmpty() && loadedDeviceIdle.isEmpty() &&
-                loadedScreenOn.isEmpty() && loadedSessions.isEmpty() && loadedProcessCount.isEmpty()
+                loadedScreenOn.isEmpty() && loadedSessions.isEmpty() && loadedProcessCount.isEmpty() &&
+                loadedMemory.isEmpty() && loadedTemperature.isEmpty()
             ) {
                 emptyStateText.text = getString(R.string.timeline_no_data)
                 android.view.View.VISIBLE
