@@ -60,6 +60,7 @@ class TimelineActivity : ComponentActivity() {
     private var loadedDeviceIdle: List<TimelineSegment<Boolean>> = emptyList()
     private var loadedScreenOn: List<TimelineSegment<Boolean>> = emptyList()
     private var loadedSessions: List<AppSession> = emptyList()
+    private var packageLabels: Map<String, String> = emptyMap()
     private var loadedTemperature: List<TimestampNum> = emptyList()
     private var loadedMemory: List<TimestampNum> = emptyList()
     private var loadedProcessCount: List<TimestampNum> = emptyList()
@@ -393,6 +394,7 @@ class TimelineActivity : ComponentActivity() {
             )
             val packageColor = mutableMapOf<String, Int>()
             loadedSessions = repository.loadAppSessions(startMs, endMs)
+            packageLabels = repository.loadPackageLabels(loadedSessions.map { it.packageName })
             sessionsBand.setSegments(
                 loadedSessions.map { session ->
                     val color = packageColor.getOrPut(session.packageName) {
@@ -436,7 +438,11 @@ class TimelineActivity : ComponentActivity() {
                     append(loadedScreenOn.firstOrNull { timestampMs in it.startMs..it.endMs }?.value?.let { "Screen on: $it\n" } ?: "")
                     append(nearestNum(loadedMemory, timestampMs, nearestWindowMs)?.let { "Mem avail: %.0f%%\n".format(it) } ?: "")
                     append(nearestNum(loadedProcessCount, timestampMs, nearestWindowMs)?.let { "Processes: %.0f\n".format(it) } ?: "")
-                    append(loadedSessions.firstOrNull { timestampMs in it.startMs..it.endMs }?.packageName?.let { "App: $it" } ?: "")
+                    append(
+                        loadedSessions.firstOrNull { timestampMs in it.startMs..it.endMs }?.packageName?.let {
+                            "App: ${packageLabels[it] ?: it}"
+                        } ?: "",
+                    )
                 }.trimEnd()
             }
 

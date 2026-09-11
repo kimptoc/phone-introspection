@@ -20,3 +20,9 @@ data class UsageEventRow(
     val key: String,
     @ColumnInfo(name = "value_text") val valueText: String?,
 )
+
+/** One `installed_packages` row: [key] is the package name, [valueText] its app label. */
+data class PackageLabelRow(
+    val key: String,
+    @ColumnInfo(name = "value_text") val valueText: String?,
+)

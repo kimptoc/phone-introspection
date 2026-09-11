@@ -96,6 +96,21 @@ interface SampleDao {
     )
     suspend fun lastUsageEventBeforeRange(startMs: Long): List<UsageEventRow>
 
+    // Most recent app label seen for each package (issue #28) - a package
+    // can be relabelled across an app update, and an uninstalled app still
+    // needs its last-known label rather than none at all, so this reads
+    // the whole `installed_packages` history rather than a single live
+    // PackageManager lookup. Same MAX(timestamp)-with-bare-column shape as
+    // lastUsageEventBeforeRange above, and for the same documented reason.
+    @Query(
+        """
+        SELECT key, MAX(timestamp) AS timestamp, value_text FROM samples
+        WHERE collector_id = 'installed_packages' AND key IN (:packageNames)
+        GROUP BY key
+        """,
+    )
+    suspend fun latestPackageLabels(packageNames: List<String>): List<PackageLabelRow>
+
     @Query("SELECT MIN(timestamp) FROM samples")
     suspend fun earliestTimestamp(): Long?
 

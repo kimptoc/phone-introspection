@@ -197,6 +197,22 @@ class TimelineRepository(private val context: Context) {
         return sessions.sortedBy { it.startMs }
     }
 
+    /**
+     * Package name -> friendly app label (issue #28), for annotating
+     * [AppSession]s in the marker/band UI. Looked up from `installed_packages`
+     * history rather than a live `PackageManager` query, so a package still
+     * resolves after the app itself has been uninstalled. A package with no
+     * `installed_packages` row (never captured, e.g. a very old session) is
+     * simply absent from the result - callers fall back to the raw package
+     * name themselves.
+     */
+    suspend fun loadPackageLabels(packageNames: Collection<String>): Map<String, String> {
+        if (packageNames.isEmpty()) return emptyMap()
+        return dao.latestPackageLabels(packageNames.distinct())
+            .mapNotNull { row -> row.valueText?.let { row.key to it } }
+            .toMap()
+    }
+
     private suspend fun loadNumeric(collectorId: String, key: String, startMs: Long, endMs: Long): List<TimestampNum> {
         val bucketMs = bucketMsFor(startMs, endMs)
         return if (bucketMs == null) {
