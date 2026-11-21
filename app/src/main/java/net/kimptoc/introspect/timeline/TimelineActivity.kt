@@ -249,6 +249,12 @@ class TimelineActivity : ComponentActivity() {
                 setDrawCircles(false)
                 lineWidth = 2f
                 axisDependency = YAxis.AxisDependency.LEFT
+                // Thin vertical line marks the finger's position; the
+                // marker sits beside it rather than on top (issue #33).
+                setDrawVerticalHighlightIndicator(true)
+                setDrawHorizontalHighlightIndicator(false)
+                highLightColor = Color.BLACK
+                highlightLineWidth = 1f
             }
 
             // Shares the left 0-100 axis with battery (both are percentages).
@@ -444,6 +450,11 @@ class TimelineActivity : ComponentActivity() {
                         } ?: "",
                     )
                 }.trimEnd()
+            }.also {
+                // chart.marker = ... doesn't attach the chart to the marker;
+                // without this the marker can't see the chart's width and
+                // can't pick the side with room (PR #34).
+                it.chartView = batteryChart
             }
 
             if (!UsageAccess.isGranted(this@TimelineActivity)) {

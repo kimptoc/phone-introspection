@@ -53,5 +53,44 @@ class TimelineMarkerView(
         super.refreshContent(e, highlight)
     }
 
-    override fun getOffset(): MPPointF = MPPointF(-(width / 2f), -height.toFloat())
+    // Gap between the finger's highlight line and the tooltip's near edge.
+    private val sideGapPx = 16f * context.resources.displayMetrics.density
+    private val drawOffset = MPPointF()
+
+    /**
+     * Places the tooltip beside the tapped point rather than centred on it
+     * (issue #33): centred-above put it right under the finger, hiding
+     * both the tooltip and the graph. It goes on whichever side of the
+     * point has more room - right of a point in the left half of the
+     * chart, left of one in the right half - so the point itself and the
+     * vertical highlight line marking it stay visible. Vertically it sits
+     * at a fixed height, the top of the plot area.
+     */
+    override fun getOffsetForDrawingAtPoint(posX: Float, posY: Float): MPPointF {
+        // Falls back to the screen size if no chart is attached, so a
+        // missing chartView can't push the tooltip off-screen.
+        val metrics = context.resources.displayMetrics
+        val chartWidth = chartView?.width?.takeIf { it > 0 }?.toFloat() ?: metrics.widthPixels.toFloat()
+        val chartHeight = chartView?.height?.takeIf { it > 0 }?.toFloat() ?: metrics.heightPixels.toFloat()
+
+        val placeRight = posX < chartWidth / 2f
+        var dx = if (placeRight) sideGapPx else -(width + sideGapPx)
+        // Very wide tooltip on a narrow chart: keep it on-screen even if
+        // that means overlapping the point.
+        if (chartWidth > 0f) {
+            dx = dx.coerceIn(-posX, (chartWidth - width - posX).coerceAtLeast(-posX))
+        }
+
+        // Fixed vertical position - the top of the plot area - rather than
+        // tracking the line's y, so the tooltip doesn't jump up and down
+        // as the finger moves. Beside the finger line, it doesn't cover
+        // the point either way. Clamped so a tall tooltip stays inside.
+        val plotTop = chartView?.viewPortHandler?.contentTop() ?: 0f
+        val top = plotTop.coerceAtMost((chartHeight - height).coerceAtLeast(0f))
+        val dy = top - posY
+
+        drawOffset.x = dx
+        drawOffset.y = dy
+        return drawOffset
+    }
 }
