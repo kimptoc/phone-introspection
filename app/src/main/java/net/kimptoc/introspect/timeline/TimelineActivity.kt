@@ -249,6 +249,12 @@ class TimelineActivity : ComponentActivity() {
                 setDrawCircles(false)
                 lineWidth = 2f
                 axisDependency = YAxis.AxisDependency.LEFT
+                // Thin vertical line marks the finger's position; the
+                // marker sits beside it rather than on top (issue #33).
+                setDrawVerticalHighlightIndicator(true)
+                setDrawHorizontalHighlightIndicator(false)
+                highLightColor = Color.BLACK
+                highlightLineWidth = 1f
             }
 
             // Shares the left 0-100 axis with battery (both are percentages).

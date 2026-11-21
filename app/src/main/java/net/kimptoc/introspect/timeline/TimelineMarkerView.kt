@@ -53,5 +53,38 @@ class TimelineMarkerView(
         super.refreshContent(e, highlight)
     }
 
-    override fun getOffset(): MPPointF = MPPointF(-(width / 2f), -height.toFloat())
+    // Gap between the finger's highlight line and the tooltip's near edge.
+    private val sideGapPx = 16f * context.resources.displayMetrics.density
+    private val drawOffset = MPPointF()
+
+    /**
+     * Places the tooltip beside the tapped point rather than centred on it
+     * (issue #33): centred-above put it right under the finger, hiding
+     * both the tooltip and the graph. It goes on whichever side of the
+     * point has more room - right of a point in the left half of the
+     * chart, left of one in the right half - so the point itself and the
+     * vertical highlight line marking it stay visible. Vertically it's
+     * centred on the point, then clamped inside the chart.
+     */
+    override fun getOffsetForDrawingAtPoint(posX: Float, posY: Float): MPPointF {
+        val chartWidth = chartView?.width?.toFloat() ?: 0f
+        val chartHeight = chartView?.height?.toFloat() ?: 0f
+
+        val placeRight = posX < chartWidth / 2f
+        var dx = if (placeRight) sideGapPx else -(width + sideGapPx)
+        // Very wide tooltip on a narrow chart: keep it on-screen even if
+        // that means overlapping the point.
+        if (chartWidth > 0f) {
+            dx = dx.coerceIn(-posX, (chartWidth - width - posX).coerceAtLeast(-posX))
+        }
+
+        var dy = -height / 2f
+        if (chartHeight > 0f) {
+            dy = dy.coerceIn(-posY, (chartHeight - height - posY).coerceAtLeast(-posY))
+        }
+
+        drawOffset.x = dx
+        drawOffset.y = dy
+        return drawOffset
+    }
 }
