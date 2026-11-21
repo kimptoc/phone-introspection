@@ -450,6 +450,11 @@ class TimelineActivity : ComponentActivity() {
                         } ?: "",
                     )
                 }.trimEnd()
+            }.also {
+                // chart.marker = ... doesn't attach the chart to the marker;
+                // without this the marker can't see the chart's width and
+                // can't pick the side with room (PR #34).
+                it.chartView = batteryChart
             }
 
             if (!UsageAccess.isGranted(this@TimelineActivity)) {

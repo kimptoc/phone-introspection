@@ -67,8 +67,11 @@ class TimelineMarkerView(
      * centred on the point, then clamped inside the chart.
      */
     override fun getOffsetForDrawingAtPoint(posX: Float, posY: Float): MPPointF {
-        val chartWidth = chartView?.width?.toFloat() ?: 0f
-        val chartHeight = chartView?.height?.toFloat() ?: 0f
+        // Falls back to the screen size if no chart is attached, so a
+        // missing chartView can't push the tooltip off-screen.
+        val metrics = context.resources.displayMetrics
+        val chartWidth = chartView?.width?.takeIf { it > 0 }?.toFloat() ?: metrics.widthPixels.toFloat()
+        val chartHeight = chartView?.height?.takeIf { it > 0 }?.toFloat() ?: metrics.heightPixels.toFloat()
 
         val placeRight = posX < chartWidth / 2f
         var dx = if (placeRight) sideGapPx else -(width + sideGapPx)
