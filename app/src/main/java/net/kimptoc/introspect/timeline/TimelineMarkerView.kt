@@ -63,8 +63,8 @@ class TimelineMarkerView(
      * both the tooltip and the graph. It goes on whichever side of the
      * point has more room - right of a point in the left half of the
      * chart, left of one in the right half - so the point itself and the
-     * vertical highlight line marking it stay visible. Vertically it's
-     * centred on the point, then clamped inside the chart.
+     * vertical highlight line marking it stay visible. Vertically it sits
+     * at a fixed height, the top of the plot area.
      */
     override fun getOffsetForDrawingAtPoint(posX: Float, posY: Float): MPPointF {
         // Falls back to the screen size if no chart is attached, so a
@@ -81,10 +81,13 @@ class TimelineMarkerView(
             dx = dx.coerceIn(-posX, (chartWidth - width - posX).coerceAtLeast(-posX))
         }
 
-        var dy = -height / 2f
-        if (chartHeight > 0f) {
-            dy = dy.coerceIn(-posY, (chartHeight - height - posY).coerceAtLeast(-posY))
-        }
+        // Fixed vertical position - the top of the plot area - rather than
+        // tracking the line's y, so the tooltip doesn't jump up and down
+        // as the finger moves. Beside the finger line, it doesn't cover
+        // the point either way. Clamped so a tall tooltip stays inside.
+        val plotTop = chartView?.viewPortHandler?.contentTop() ?: 0f
+        val top = plotTop.coerceAtMost((chartHeight - height).coerceAtLeast(0f))
+        val dy = top - posY
 
         drawOffset.x = dx
         drawOffset.y = dy
